@@ -517,6 +517,139 @@ export interface InviteInfo {
   expiresAt: string;
 }
 
+/* ---------- Week 4: messages and tickets ---------- */
+
+export interface Attachment {
+  id: string;
+  name: string;
+  sizeKb: number;
+  kind: 'IMAGE' | 'PDF' | 'DOC' | 'OTHER';
+  /** Short-lived link to view or download. Absent for files only the server can open. */
+  url?: string;
+}
+
+export interface ReadReceipt {
+  userId: string;
+  name: string;
+  at: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  conversationId: string;
+  authorId: string;
+  authorName: string;
+  /** True for Webinger staff. */
+  fromAgency: boolean;
+  at: string;
+  text: string;
+  /** Staff-only note. Never returned to client roles. */
+  internal: boolean;
+  attachments: Attachment[];
+  readBy: ReadReceipt[];
+  ticketId?: string;
+  ticketNumber?: string;
+}
+
+export interface Conversation {
+  id: string;
+  kind: 'PROJECT' | 'TEAM';
+  title: string;
+  projectId?: string;
+  clientName?: string;
+  unreadCount: number;
+  lastMessage?: { text: string; at: string; authorName: string; internal: boolean };
+  /** A client message nobody at Webinger has answered yet (staff only). */
+  awaitingReply?: { since: string; dueAt: string };
+  openTickets: number;
+  members: Array<{ id: string; name: string; fromAgency: boolean }>;
+}
+
+export interface NewMessage {
+  text: string;
+  internal: boolean;
+  attachmentIds: string[];
+}
+
+export type TicketStatus = 'OPEN' | 'WAITING_ON_CLIENT' | 'RESOLVED';
+
+export interface Ticket {
+  id: string;
+  number: string;
+  title: string;
+  conversationId: string;
+  messageId: string;
+  projectName: string;
+  clientName: string;
+  status: TicketStatus;
+  priority: Priority;
+  assigneeId: string;
+  assigneeName: string;
+  createdAt: string;
+  createdBy: string;
+  /** Business-hours deadlines from the response-time settings. */
+  firstResponseDueAt: string;
+  firstRespondedAt?: string;
+  resolveDueAt: string;
+  resolvedAt?: string;
+}
+
+export interface NewTicket {
+  title: string;
+  priority: Priority;
+}
+
+export interface TicketPatch {
+  status?: TicketStatus;
+  assigneeId?: string;
+}
+
+export interface Availability {
+  openNow: boolean;
+  /** When the team is next available, if closed now. */
+  opensAt?: string;
+  hoursText: string;
+  firstReplyHours: number;
+}
+
+/* ---------- Week 4: files and brand vault ---------- */
+
+export type FileFolder = 'LOGOS' | 'FONTS' | 'GUIDELINES' | 'PHOTOS' | 'DELIVERABLES';
+
+export interface FileVersion {
+  number: number;
+  sizeKb: number;
+  uploadedAt: string;
+  uploadedBy: string;
+  note?: string;
+  previewUrl?: string;
+}
+
+export interface FileItem {
+  id: string;
+  name: string;
+  folder: FileFolder;
+  kind: Attachment['kind'] | 'FONT';
+  projectId?: string;
+  projectName?: string;
+  currentVersion: number;
+  versionCount: number;
+  sizeKb: number;
+  updatedAt: string;
+  updatedBy: string;
+  previewUrl?: string;
+}
+
+export interface FileDetail extends FileItem {
+  versions: FileVersion[];
+}
+
+export interface DownloadLink {
+  url: string;
+  fileName: string;
+  expiresAt: string;
+}
+
 /* ---------- API errors ---------- */
 
 /** Matches Spring's RFC 9457 ProblemDetail response body. */

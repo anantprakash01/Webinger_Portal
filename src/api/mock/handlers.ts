@@ -34,12 +34,13 @@ import type {
   User,
 } from '@/types';
 import { post } from './art';
+// Circular with chat.ts on purpose: both only call each other inside functions.
+import { previewsFor } from './chat';
 import {
   approvals,
   CLIENT_NAME,
   day,
   invoices,
-  messages,
   nameOf,
   ORG,
   projects,
@@ -214,7 +215,6 @@ export function clientDashboard(user: User): ClientDashboard {
   requireArea(user, 'client');
   const org = user.organisationId;
   const visible = projects.filter((p) => p.status === 'ACTIVE' && canSeeProject(user, p));
-  const visibleNames = new Set(visible.map((p) => p.name));
   // BACKEND: billing needs the BILLING_VIEW permission (owners always; reps only if granted).
   const canSeeBilling = hasPermission(user, 'BILLING_VIEW');
   return {
@@ -243,9 +243,7 @@ export function clientDashboard(user: User): ClientDashboard {
       { label: 'Website visits', value: '12,460', change: '+9%', good: true },
       { label: 'Leads', value: '86', change: '−4%', good: false },
     ],
-    messages: messages
-      .filter((m) => m.organisationId === org && m.toUserId === user.id && visibleNames.has(m.projectName))
-      .map((m) => strip(m, 'organisationId', 'toUserId')),
+    messages: previewsFor(user),
     offer: {
       id: 'o1',
       title: 'Add influencer marketing',
@@ -262,7 +260,7 @@ export function employeeDashboard(user: User): EmployeeDashboard {
     today: mine.filter((t) => t.due <= day(0)).map(toTaskItem),
     thisWeek: mine.filter((t) => t.due > day(0) && t.due <= day(7)).map(toTaskItem),
     reviewQueue: tasks.filter((t) => t.reviewerId === user.id && t.status === 'IN_REVIEW').map(toTaskItem),
-    messages: messages.filter((m) => m.toUserId === user.id).map((m) => strip(m, 'organisationId', 'toUserId')),
+    messages: previewsFor(user),
     scorecard: { onTimeRate: 92, firstPassQuality: 78, clientRating: 4.6, hoursLogged: 31, hoursCapacity: 40 },
     announcements: [
       { id: 'n1', title: 'Office closed on 25 December', at: day(-1) },

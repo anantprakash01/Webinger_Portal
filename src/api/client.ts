@@ -16,7 +16,20 @@ import type {
   ApprovalDetail,
   ApprovalItem,
   ApprovalStatus,
+  Attachment,
+  Availability,
+  ChatMessage,
   ClientDashboard,
+  Conversation,
+  DownloadLink,
+  FileDetail,
+  FileFolder,
+  FileItem,
+  NewMessage,
+  NewTicket,
+  Ticket,
+  TicketPatch,
+  TicketStatus,
   ClientTeam,
   ClientTeamMember,
   EmployeeDashboard,
@@ -47,6 +60,8 @@ import type {
 } from '@/types';
 import * as accounts from './mock/accounts';
 import * as approvalsMock from './mock/approvals';
+import * as chat from './mock/chat';
+import * as files from './mock/files';
 import * as mock from './mock/handlers';
 
 const MODE = (import.meta.env.VITE_API_MODE ?? 'mock') as 'mock' | 'http';
@@ -153,6 +168,26 @@ async function http<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw err;
   }
   return res.status === 204 || res.status === 202 ? (undefined as T) : ((await res.json()) as T);
+}
+
+/** Multipart upload; the browser sets the boundary, so no JSON content type here. */
+async function httpUpload<T>(path: string, form: FormData): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'POST',
+    body: form,
+    credentials: 'include',
+    headers: current ? { Authorization: `Bearer ${current.accessToken}` } : {},
+  });
+  if (!res.ok) {
+    let problem: ApiProblem = { status: res.status, title: res.statusText };
+    try {
+      problem = { ...problem, ...(await res.json()) };
+    } catch {
+      /* body was not JSON */
+    }
+    throw new ApiError(problem);
+  }
+  return (await res.json()) as T;
 }
 
 /** Builds ?a=1&b=2 from an object, skipping empty values. */
@@ -280,6 +315,55 @@ export const api = {
     get: () => (isMock ? fromMock(accounts.getSettings) : http<PortalSettings>('/settings')),
     save: (body: PortalSettings) =>
       isMock ? fromMock((u) => accounts.saveSettings(u, body)) : http<PortalSettings>('/settings', json('PUT', body)),
+  },
+  messages: {
+    conversations: () => (isMock ? fromMock(chat.listConversations) : http<Conversation[]>('/conversations')),
+    /** Only messages after `after` (a message id), so polling stays cheap. */
+    list: (conversationId: string, after?: string) =>
+      isMock
+        ? fromMock((u) => chat.listMessages(u, conversationId, after))
+        : http<ChatMessage[]>(`/conversations/${enc(conversationId)}/messages${qs({ after })}`),
+    send: (conversationId: string, body: NewMessage) =>
+      isMock
+        ? fromMock((u) => chat.postMessage(u, conversationId, body))
+        : http<ChatMessage>(`/conversations/${enc(conversationId)}/messages`, json('POST', body)),
+    markRead: (conversationId: string, upToId: string) =>
+      isMock
+        ? fromMock((u) => chat.markRead(u, conversationId, upToId))
+        : http<void>(`/conversations/${enc(conversationId)}/read`, json('POST', { upToId })),
+    toTicket: (messageId: string, body: NewTicket) =>
+      isMock ? fromMock((u) => chat.createTicket(u, messageId, body)) : http<Ticket>(`/messages/${enc(messageId)}/ticket`, json('POST', body)),
+    availability: () => (isMock ? fromMock(() => chat.availability()) : http<Availability>('/availability')),
+  },
+  tickets: {
+    list: (q: { status?: TicketStatus } = {}) => (isMock ? fromMock((u) => chat.listTickets(u, q)) : http<Ticket[]>(`/tickets${qs(q)}`)),
+    update: (id: string, patch: TicketPatch) =>
+      isMock ? fromMock((u) => chat.updateTicket(u, id, patch)) : http<Ticket>(`/tickets/${enc(id)}`, json('PATCH', patch)),
+  },
+  uploads: {
+    /** Uploads one file and returns an id to attach to a message. */
+    create(file: File): Promise<Attachment> {
+      if (isMock) {
+        // The prototype keeps images in memory for this tab so they can be previewed.
+        const url = file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined;
+        return fromMock((u) => chat.registerUpload(u, { name: file.name, sizeKb: file.size / 1024, url }));
+      }
+      const form = new FormData();
+      form.append('file', file);
+      return httpUpload<Attachment>('/uploads', form);
+    },
+  },
+  files: {
+    list: (q: { folder?: FileFolder } = {}) => (isMock ? fromMock((u) => files.listFiles(u, q)) : http<FileItem[]>(`/files${qs(q)}`)),
+    get: (id: string) => (isMock ? fromMock((u) => files.getFile(u, id)) : http<FileDetail>(`/files/${enc(id)}`)),
+    /** A download link that expires after a few minutes. */
+    async link(id: string, version?: number): Promise<DownloadLink> {
+      if (!isMock) return http<DownloadLink>(`/files/${enc(id)}/link`, json('POST', { version }));
+      const link = await fromMock((u) => files.createDownloadLink(u, id, version));
+      // Demo: turn the signed path into a real browser download of the preview file.
+      const f = files.resolveDownload(link.url);
+      return { ...link, fileName: f.fileName, url: URL.createObjectURL(new Blob([f.content], { type: f.mime })) };
+    },
   },
   /** Prototype only: emails the mock would have sent, so invite and reset links can be opened. */
   demo: {

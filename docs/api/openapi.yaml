@@ -1,12 +1,14 @@
 openapi: 3.1.0
 info:
   title: Webinger Portal API
-  version: 0.3.0
+  version: 0.4.0
   description: |
     Contract between the React frontend and the Spring Boot backend.
     Week 1 covers sign-in and one dashboard per portal area.
     Week 2 adds projects and tasks.
     Week 3 adds approvals, internal review, the client team, user admin, settings and the auth flows.
+    Week 4 adds messages, tickets, uploads and files. Live updates: Phase 0 polls GET .../messages;
+    Phase 1 adds Spring WebSocket (STOMP) topics /topic/conversations/{id} and /user/queue/inbox with the same payloads.
     Every endpoint below is served by src/api/mock in Phase 0 and by Spring Boot from Phase 1.
 
     Access rules the backend must enforce on every call:
@@ -19,6 +21,10 @@ info:
       - every authenticated request re-checks the account: suspended accounts and sessions issued
         before sessionsRevokedAt (force logout, password reset) get 401
       - users, roles and settings changes are SUPER_ADMIN only; two Super Admins at all times
+      - chat: employees see a project channel only when assigned to the project; internal notes
+        are never returned to client roles; clients cannot write internal notes
+      - files: clients see their own company's CLIENT-visible vault files and deliverables of
+        projects they can see; download links are signed and expire after 5 minutes
 servers:
   - url: /api/v1
 security:
@@ -701,6 +707,213 @@ paths:
         '400': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
 
+  /conversations:
+    get:
+      tags: [messages]
+      summary: Channels the caller may read. Staff and client roles.
+      description: |
+        One channel per project plus a staff-only team channel. Sorted by latest message.
+        awaitingReply (staff only) shows an unanswered client message and its business-hours deadline.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Conversation' } }
+        '403': { $ref: '#/components/responses/Problem' }
+  /conversations/{id}/messages:
+    get:
+      tags: [messages]
+      summary: Messages in a channel, oldest first
+      description: |
+        Internal notes are left out for client roles.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: after, in: query, schema: { type: string }, description: Only messages after this message id (catch-up after reconnect) }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/ChatMessage' } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [messages]
+      summary: Send a message or internal note
+      description: |
+        Text up to 4,000 characters and/or up to 5 uploaded attachments (each upload used once, by its uploader).
+        internal=true is staff only (403 for clients). A public staff reply marks open tickets in the channel as first-responded.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NewMessage' }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChatMessage' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /conversations/{id}/read:
+    post:
+      tags: [messages]
+      summary: Read receipts up to and including a message
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [upToId], properties: { upToId: { type: string } } }
+      responses:
+        '204': { description: Done }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /messages/{id}/ticket:
+    post:
+      tags: [tickets]
+      summary: Turn a client message into a ticket. Staff only.
+      description: |
+        Only public client messages (400 otherwise); once per message (409). Assigned to the project owner.
+        Clocks start at the client's message and count business hours only (settings.responseTimes).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NewTicket' }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Ticket' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /tickets:
+    get:
+      tags: [tickets]
+      summary: Tickets in channels the caller may read
+      parameters:
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/TicketStatus' } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Ticket' } }
+        '403': { $ref: '#/components/responses/Problem' }
+  /tickets/{id}:
+    patch:
+      tags: [tickets]
+      summary: Change status or owner. Staff only.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TicketPatch' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Ticket' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /availability:
+    get:
+      tags: [messages]
+      summary: Is the team working now? Any signed-in user.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Availability' }
+  /uploads:
+    post:
+      tags: [messages]
+      summary: Upload one file to attach to a message
+      description: |
+        Images, PDF, Office files, CSV, TXT or ZIP up to 10 MB. Larger videos are shared as links.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { type: object, required: [file], properties: { file: { type: string, format: binary } } }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Attachment' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+
+  /files:
+    get:
+      tags: [files]
+      summary: Brand vault files and approved deliverables the caller may see
+      description: |
+        Deliverables are approvals with status APPROVED; their versions are the approval versions.
+      parameters:
+        - { name: folder, in: query, schema: { $ref: '#/components/schemas/FileFolder' } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/FileItem' } }
+        '403': { $ref: '#/components/responses/Problem' }
+  /files/{id}:
+    get:
+      tags: [files]
+      summary: File with version history (newest first)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FileDetail' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /files/{id}/link:
+    post:
+      tags: [files]
+      summary: Create a signed download link
+      description: |
+        The link works for 5 minutes and only for the requested version. Phase 1: S3 pre-signed URL.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, properties: { version: { type: integer, description: Defaults to the current version } } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DownloadLink' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
 components:
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
@@ -1337,3 +1550,159 @@ components:
             deputyPayoutLimit: { type: number, description: INR }
         defaultRevisions: { type: integer }
         reminderAfterDays: { type: integer }
+
+    # ---------- Week 4 ----------
+    Attachment:
+      type: object
+      required: [id, name, sizeKb, kind]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        sizeKb: { type: integer }
+        kind: { type: string, enum: [IMAGE, PDF, DOC, OTHER] }
+        url: { type: string, description: Short-lived signed link }
+    ReadReceipt:
+      type: object
+      required: [userId, name, at]
+      properties:
+        userId: { type: string }
+        name: { type: string }
+        at: { type: string, format: date-time }
+    ChatMessage:
+      type: object
+      required: [id, conversationId, authorId, authorName, fromAgency, at, text, internal, attachments, readBy]
+      properties:
+        id: { type: string }
+        conversationId: { type: string }
+        authorId: { type: string }
+        authorName: { type: string }
+        fromAgency: { type: boolean }
+        at: { type: string, format: date-time }
+        text: { type: string }
+        internal: { type: boolean, description: Staff-only note; never sent to client roles }
+        attachments: { type: array, items: { $ref: '#/components/schemas/Attachment' } }
+        readBy: { type: array, items: { $ref: '#/components/schemas/ReadReceipt' } }
+        ticketId: { type: string }
+        ticketNumber: { type: string }
+    Conversation:
+      type: object
+      required: [id, kind, title, unreadCount, openTickets, members]
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [PROJECT, TEAM] }
+        title: { type: string }
+        projectId: { type: string }
+        clientName: { type: string }
+        unreadCount: { type: integer }
+        lastMessage:
+          type: object
+          properties:
+            text: { type: string }
+            at: { type: string, format: date-time }
+            authorName: { type: string }
+            internal: { type: boolean }
+        awaitingReply:
+          type: object
+          description: Staff only
+          properties:
+            since: { type: string, format: date-time }
+            dueAt: { type: string, format: date-time }
+        openTickets: { type: integer }
+        members:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              name: { type: string }
+              fromAgency: { type: boolean }
+    NewMessage:
+      type: object
+      required: [text, internal, attachmentIds]
+      properties:
+        text: { type: string, maxLength: 4000 }
+        internal: { type: boolean }
+        attachmentIds: { type: array, maxItems: 5, items: { type: string } }
+    TicketStatus: { type: string, enum: [OPEN, WAITING_ON_CLIENT, RESOLVED] }
+    Ticket:
+      type: object
+      required: [id, number, title, conversationId, messageId, projectName, clientName, status, priority, assigneeId, assigneeName, createdAt, createdBy, firstResponseDueAt, resolveDueAt]
+      properties:
+        id: { type: string }
+        number: { type: string, example: TCK-0042 }
+        title: { type: string }
+        conversationId: { type: string }
+        messageId: { type: string }
+        projectName: { type: string }
+        clientName: { type: string }
+        status: { $ref: '#/components/schemas/TicketStatus' }
+        priority: { $ref: '#/components/schemas/Priority' }
+        assigneeId: { type: string }
+        assigneeName: { type: string }
+        createdAt: { type: string, format: date-time }
+        createdBy: { type: string }
+        firstResponseDueAt: { type: string, format: date-time }
+        firstRespondedAt: { type: string, format: date-time }
+        resolveDueAt: { type: string, format: date-time }
+        resolvedAt: { type: string, format: date-time }
+    NewTicket:
+      type: object
+      required: [title, priority]
+      properties:
+        title: { type: string, minLength: 3, maxLength: 120 }
+        priority: { $ref: '#/components/schemas/Priority' }
+    TicketPatch:
+      type: object
+      minProperties: 1
+      properties:
+        status: { $ref: '#/components/schemas/TicketStatus' }
+        assigneeId: { type: string }
+    Availability:
+      type: object
+      required: [openNow, hoursText, firstReplyHours]
+      properties:
+        openNow: { type: boolean }
+        opensAt: { type: string, format: date-time }
+        hoursText: { type: string, example: 'Mon–Sat, 10:00–19:00 IST' }
+        firstReplyHours: { type: integer }
+    FileFolder: { type: string, enum: [LOGOS, FONTS, GUIDELINES, PHOTOS, DELIVERABLES] }
+    FileVersion:
+      type: object
+      required: [number, sizeKb, uploadedAt, uploadedBy]
+      properties:
+        number: { type: integer }
+        sizeKb: { type: integer }
+        uploadedAt: { type: string, format: date-time }
+        uploadedBy: { type: string }
+        note: { type: string }
+        previewUrl: { type: string }
+    FileItem:
+      type: object
+      required: [id, name, folder, kind, currentVersion, versionCount, sizeKb, updatedAt, updatedBy]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        folder: { $ref: '#/components/schemas/FileFolder' }
+        kind: { type: string, enum: [IMAGE, PDF, DOC, OTHER, FONT] }
+        projectId: { type: string }
+        projectName: { type: string }
+        currentVersion: { type: integer }
+        versionCount: { type: integer }
+        sizeKb: { type: integer }
+        updatedAt: { type: string, format: date-time }
+        updatedBy: { type: string }
+        previewUrl: { type: string }
+    FileDetail:
+      allOf:
+        - $ref: '#/components/schemas/FileItem'
+        - type: object
+          required: [versions]
+          properties:
+            versions: { type: array, items: { $ref: '#/components/schemas/FileVersion' }, description: Newest first }
+    DownloadLink:
+      type: object
+      required: [url, fileName, expiresAt]
+      properties:
+        url: { type: string }
+        fileName: { type: string }
+        expiresAt: { type: string, format: date-time }
