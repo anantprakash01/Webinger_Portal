@@ -20,6 +20,9 @@ import type {
   ApprovalStatus,
   ChatMessage,
   ClientTeam,
+  ClientPatch,
+  ClientQuery,
+  NewClient,
   Conversation,
   NewMessage,
   NewTicket,
@@ -259,6 +262,30 @@ export function useSaveSettings() {
 /** Prototype only: the latest email sent to an address, so its link can be opened. */
 export const useDemoOutbox = (to?: string, enabled = true) =>
   useQuery({ queryKey: ['demo', 'outbox', to ?? 'all'], queryFn: () => api.demo.outbox(to), enabled, staleTime: 0 });
+
+/* ---------- Admin: clients ---------- */
+
+export const useClients = (q: ClientQuery) =>
+  useQuery({ queryKey: ['clients', 'list', q], queryFn: () => api.clients.list(q), placeholderData: keepPreviousData });
+export const useClient = (id: string) => useQuery({ queryKey: ['clients', 'detail', id], queryFn: () => api.clients.get(id) });
+export const useAccountManagers = () => useQuery({ queryKey: ['clients', 'managers'], queryFn: api.clients.managers, staleTime: 5 * 60_000 });
+
+/** Create, edit and note mutations all return the fresh client; the list (health, manager) is refetched. */
+export function useClientMutation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (
+      m: { kind: 'create'; body: NewClient } | { kind: 'update'; id: string; patch: ClientPatch } | { kind: 'note'; id: string; text: string },
+    ) => (m.kind === 'create' ? api.clients.create(m.body) : m.kind === 'update' ? api.clients.update(m.id, m.patch) : api.clients.addNote(m.id, m.text)),
+    onSuccess: (c) => {
+      qc.setQueryData(['clients', 'detail', c.id], c);
+      void qc.invalidateQueries({ queryKey: ['clients', 'list'] });
+      // A new client also adds an organisation and a user account; a new manager changes the client's dashboard.
+      void qc.invalidateQueries({ queryKey: ['admin'] });
+      void qc.invalidateQueries({ queryKey: ['demo'] });
+    },
+  });
+}
 
 /* ---------- Week 4: messages, tickets, files ---------- */
 

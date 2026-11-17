@@ -20,6 +20,11 @@ import type {
   Availability,
   ChatMessage,
   ClientDashboard,
+  ClientDetail,
+  ClientListItem,
+  ClientPatch,
+  ClientQuery,
+  NewClient,
   Conversation,
   DownloadLink,
   FileDetail,
@@ -61,6 +66,7 @@ import type {
 import * as accounts from './mock/accounts';
 import * as approvalsMock from './mock/approvals';
 import * as chat from './mock/chat';
+import * as clientsMock from './mock/clients';
 import * as files from './mock/files';
 import * as mock from './mock/handlers';
 
@@ -310,6 +316,21 @@ export const api = {
       isMock ? fromMock((u) => accounts.forceLogout(u, id)) : http<void>(`/admin/users/${enc(id)}/logout`, json('POST')),
     loginHistory: (userId?: string) =>
       isMock ? fromMock((u) => accounts.loginHistory(u, userId)) : http<LoginEvent[]>(`/admin/login-history${qs({ userId })}`),
+  },
+  clients: {
+    list: (q: ClientQuery = {}) => (isMock ? fromMock((u) => clientsMock.listClients(u, q)) : http<ClientListItem[]>(`/clients${qs(q)}`)),
+    get: (id: string) => (isMock ? fromMock((u) => clientsMock.getClient(u, id)) : http<ClientDetail>(`/clients/${enc(id)}`)),
+    create: (body: NewClient) =>
+      isMock ? fromMock((u) => clientsMock.createClient(u, body)) : http<ClientDetail>('/clients', json('POST', body)),
+    update: (id: string, patch: ClientPatch) =>
+      isMock ? fromMock((u) => clientsMock.updateClient(u, id, patch)) : http<ClientDetail>(`/clients/${enc(id)}`, json('PATCH', patch)),
+    addNote: (id: string, text: string) =>
+      isMock ? fromMock((u) => clientsMock.addClientNote(u, id, text)) : http<ClientDetail>(`/clients/${enc(id)}/notes`, json('POST', { text })),
+    /** Active Webinger staff who can be an account manager or backup. */
+    managers: () =>
+      isMock
+        ? fromMock(clientsMock.staffChoices)
+        : http<Array<{ id: string; name: string; title?: string }>>('/clients/account-managers'),
   },
   settings: {
     get: () => (isMock ? fromMock(accounts.getSettings) : http<PortalSettings>('/settings')),

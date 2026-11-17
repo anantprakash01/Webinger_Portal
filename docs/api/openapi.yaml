@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Webinger Portal API
-  version: 0.4.0
+  version: 0.4.1
   description: |
     Contract between the React frontend and the Spring Boot backend.
     Week 1 covers sign-in and one dashboard per portal area.
@@ -9,6 +9,7 @@ info:
     Week 3 adds approvals, internal review, the client team, user admin, settings and the auth flows.
     Week 4 adds messages, tickets, uploads and files. Live updates: Phase 0 polls GET .../messages;
     Phase 1 adds Spring WebSocket (STOMP) topics /topic/conversations/{id} and /user/queue/inbox with the same payloads.
+    0.4.1 adds the admin clients module (list, detail with health score, create, edit, notes).
     Every endpoint below is served by src/api/mock in Phase 0 and by Spring Boot from Phase 1.
 
     Access rules the backend must enforce on every call:
@@ -25,6 +26,8 @@ info:
         are never returned to client roles; clients cannot write internal notes
       - files: clients see their own company's CLIENT-visible vault files and deliverables of
         projects they can see; download links are signed and expire after 5 minutes
+      - clients: /clients is SUPER_ADMIN and MANAGER only; creating a client (it issues a login)
+        and changing a client's status are SUPER_ADMIN only; lifetimeValue is never sent to managers
 servers:
   - url: /api/v1
 security:
@@ -914,6 +917,118 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
 
+  /clients:
+    get:
+      tags: [clients]
+      summary: Client companies. SUPER_ADMIN and MANAGER.
+      description: |
+        Order: live clients first, then red, amber, green, then lowest score.
+        Phase 1: a manager sees only clients of their teams.
+      parameters:
+        - { name: q, in: query, schema: { type: string }, description: Name, industry, city or account manager }
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/ClientStatus' } }
+        - { name: health, in: query, schema: { $ref: '#/components/schemas/Health' } }
+        - { name: accountManagerId, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/ClientListItem' } }
+        '403': { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [clients]
+      summary: Add a client and invite its owner. SUPER_ADMIN only.
+      description: |
+        One transaction: organisation (kind CLIENT), client profile (status ONBOARDING), CLIENT_OWNER account (INVITED)
+        and a 7-day invite email. 409 when the company name or the owner's email already exists.
+        Phase 2: a won deal in the pipeline calls the same service.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NewClient' }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientDetail' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /clients/account-managers:
+    get:
+      tags: [clients]
+      summary: Active agency staff who can be account manager or backup
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { type: object, properties: { id: { type: string }, name: { type: string }, title: { type: string } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+  /clients/{id}:
+    get:
+      tags: [clients]
+      summary: Client record with health factors, contacts, contracts, projects and history
+      description: |
+        Health rule (same as project health): AMBER when a task on a live project is overdue or an approval
+        waits more than 5 days; RED when a milestone is missed, an invoice is 15+ days late or satisfaction <= 2.
+        healthScore = 100 minus the factor penalties; it ranks clients but never overrides the level.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string }, description: The client's organisationId }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientDetail' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+    patch:
+      tags: [clients]
+      summary: Edit profile, account manager or status
+      description: |
+        Admin area. Changing status is SUPER_ADMIN only (403 for managers). Account manager and backup must be
+        active agency staff and different people. Every change is written to the client's history.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string }, description: The client's organisationId }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ClientPatch' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientDetail' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /clients/{id}/notes:
+    post:
+      tags: [clients]
+      summary: Add an internal note to the client history
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string }, description: The client's organisationId }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [text], properties: { text: { type: string, minLength: 2, maxLength: 2000 } } }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientDetail' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
 components:
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
@@ -1706,3 +1821,116 @@ components:
         url: { type: string }
         fileName: { type: string }
         expiresAt: { type: string, format: date-time }
+
+    # ---------- Admin: clients (0.4.1) ----------
+    ClientStatus: { type: string, enum: [ONBOARDING, ACTIVE, PAUSED, ENDED] }
+    ClientListItem:
+      type: object
+      required: [id, name, industry, city, status, clientSince, accountManager, activeProjects, totalProjects, services, health, healthScore, monthlyRetainer, outstanding]
+      properties:
+        id: { type: string, description: organisationId }
+        name: { type: string }
+        industry: { type: string }
+        city: { type: string }
+        status: { $ref: '#/components/schemas/ClientStatus' }
+        clientSince: { type: string, format: date }
+        accountManager: { type: object, properties: { id: { type: string }, name: { type: string } } }
+        activeProjects: { type: integer }
+        totalProjects: { type: integer }
+        services: { type: array, items: { type: string } }
+        health: { $ref: '#/components/schemas/Health' }
+        healthScore: { type: integer, minimum: 0, maximum: 100 }
+        monthlyRetainer: { type: number, description: Running retainer contracts, INR before GST }
+        outstanding: { type: number, description: Unpaid invoices, INR }
+        renewalDue: { type: string, format: date, description: Earliest end date of a running contract }
+    HealthFactor:
+      type: object
+      required: [key, label, level, detail, penalty]
+      properties:
+        key: { type: string, enum: [OVERDUE_TASKS, SLOW_APPROVALS, MISSED_MILESTONES, LATE_INVOICE, SATISFACTION] }
+        label: { type: string }
+        level: { type: string, enum: [OK, AMBER, RED] }
+        detail: { type: string }
+        penalty: { type: integer }
+    ClientContact:
+      type: object
+      required: [id, name, email, role, status, canSeeBilling]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        title: { type: string }
+        email: { type: string }
+        role: { type: string, enum: [CLIENT_OWNER, CLIENT_REP] }
+        status: { $ref: '#/components/schemas/AccountStatus' }
+        lastLoginAt: { type: string, format: date-time }
+        canSeeBilling: { type: boolean }
+    ClientContract:
+      type: object
+      required: [id, title, kind, startDate, endDate, value, revisionsPerDeliverable, status]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        kind: { type: string, enum: [RETAINER, PROJECT] }
+        startDate: { type: string, format: date }
+        endDate: { type: string, format: date }
+        value: { type: number, description: Monthly for retainers, total for projects; INR before GST }
+        revisionsPerDeliverable: { type: integer }
+        status: { type: string, enum: [ACTIVE, ENDING_SOON, ENDED], description: ENDING_SOON within 30 days of endDate }
+    ClientHistoryItem:
+      type: object
+      required: [id, at, actor, kind, text]
+      properties:
+        id: { type: string }
+        at: { type: string, format: date-time }
+        actor: { type: string }
+        kind: { type: string, enum: [CREATED, CONTRACT, PROJECT, INVOICE, APPROVAL, NOTE, STATUS, CHANGE] }
+        text: { type: string }
+    ClientDetail:
+      allOf:
+        - $ref: '#/components/schemas/ClientListItem'
+        - type: object
+          required: [legalName, address, healthFactors, contacts, contracts, projects, history]
+          properties:
+            legalName: { type: string }
+            gstin: { type: string, pattern: '^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$' }
+            website: { type: string }
+            address: { type: string }
+            backupManager: { type: object, properties: { id: { type: string }, name: { type: string } } }
+            satisfaction: { type: number, description: Average milestone rating 1-5 }
+            approvalDays: { type: number, description: Average days from sent-for-approval to decision }
+            healthFactors: { type: array, items: { $ref: '#/components/schemas/HealthFactor' } }
+            contacts: { type: array, items: { $ref: '#/components/schemas/ClientContact' } }
+            contracts: { type: array, items: { $ref: '#/components/schemas/ClientContract' } }
+            projects: { type: array, items: { $ref: '#/components/schemas/ProjectListItem' } }
+            history: { type: array, items: { $ref: '#/components/schemas/ClientHistoryItem' }, description: Newest first }
+            lifetimeValue: { type: number, description: SUPER_ADMIN only; never sent to managers }
+    NewClient:
+      type: object
+      required: [name, legalName, industry, city, accountManagerId, owner]
+      properties:
+        name: { type: string, minLength: 2 }
+        legalName: { type: string }
+        industry: { type: string }
+        city: { type: string }
+        gstin: { type: string }
+        website: { type: string }
+        accountManagerId: { type: string }
+        owner:
+          type: object
+          required: [name, email]
+          properties:
+            name: { type: string }
+            email: { type: string, format: email }
+            title: { type: string }
+    ClientPatch:
+      type: object
+      minProperties: 1
+      properties:
+        industry: { type: string }
+        city: { type: string }
+        gstin: { type: string, description: Empty string clears it }
+        website: { type: string }
+        address: { type: string }
+        accountManagerId: { type: string }
+        backupManagerId: { type: string, description: Empty string removes the backup }
+        status: { $ref: '#/components/schemas/ClientStatus' }

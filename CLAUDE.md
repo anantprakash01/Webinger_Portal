@@ -274,6 +274,7 @@ Week estimates assume one or two developers with AI assistance.
 | 2 | Projects and tasks | **Done** |
 | 3 | Approvals, review queue, client team, admin users & settings, password reset | **Done** |
 | 4 | Messages and files | **Done** |
+| 4b | Admin clients (pulled forward from Week 6) | **Done** |
 | 5 | Finance, billing, client reports | Next |
 | 6 | Sales pipeline, people, performance | |
 | 7 | Influencer portal, partner portal, discovery | |
@@ -358,6 +359,23 @@ Original spec:
 - Mock real-time with polling; design so Spring WebSocket drops in later.
 - Client `/client/files`: brand vault (logos, fonts, guidelines), deliverables, version history, download with expiring link.
 
+### Admin clients — pulled forward from Week 6 (Done, 2026-11-17)
+Why early: the nav had Clients tagged "Week 2" while the plan put it in Week 6, so the menu showed a placeholder that looked forgotten. Built before Week 5 because finance (invoices, GST, profit per client) needs real client records to hang off. Branch `addmin-clients`.
+- Contract v0.4.1 (53 paths): `GET /clients` (q, status, health, accountManagerId), `POST /clients`, `GET /clients/account-managers`, `GET|PATCH /clients/{id}`, `POST /clients/{id}/notes`. A client's id is its `organisationId`.
+- Mock module `src/api/mock/clients.ts`: client profile rows (legal name, GSTIN, industry, city, address, status, account manager + backup, satisfaction, lifetime value, contracts, stored history), seeded for Terra, Nova, Sunrise and a former client **Bluepeak Fitness** (ENDED, no logins, added to `ORG` / `organisations`).
+- Rules the backend must copy (all marked `BACKEND:`):
+  - `/clients` is SUPER_ADMIN and MANAGER only (403 for everyone else; unknown id 404). Phase 1: managers see only clients of their teams.
+  - Creating a client is SUPER_ADMIN only because it issues a login: one transaction creates the organisation (CLIENT), the profile (ONBOARDING), the CLIENT_OWNER account (INVITED) and the 7-day invite email. Duplicate company name or existing email → 409. GSTIN validated (15-char format).
+  - Changing status (Onboarding / Active / Paused / Ended) is SUPER_ADMIN only; managers may edit the rest. Account manager and backup must be active agency staff and different people. Every change and status move is written to the client history; notes are staff-only (clients never see their record).
+  - `lifetimeValue` (paid to date) is SUPER_ADMIN only; managers get retainer and outstanding (matrix: invoices "view team").
+  - **Health rule** = section 4.5 applied per client over live work: AMBER when a task on an active project is overdue or an approval waits > 5 days; RED when a milestone is missed, an invoice is 15+ days late, or satisfaction ≤ 2. `healthScore` = 100 − factor penalties (overdue tasks 5 each max 20, slow approvals 10 each max 20, missed milestones 15 each max 30, invoice 15+ days 25 / under 15 days 5, satisfaction ≤ 2 25 / < 3.5 10). The score only ranks; the colour always follows the rule.
+  - Contracts: ENDING_SOON within 30 days of the end date (automation rule 15). Monthly retainer = running RETAINER contracts only.
+  - The client dashboard's account-manager card now reads the client record (`accountManagerOf`), so reassigning in admin changes what the client sees.
+- Screens: `/admin/clients` (summary cards, search + status/health/manager filters in the URL, table → cards on phones, "Add client" drawer for Super Admin that lands on the new record with the demo invite email), `/admin/clients/:id` (facts strip, health card with each factor and its penalty, profile, projects capped at the 8 most at risk with a link to Projects filtered by client, contacts with account status and billing access, contracts, history with internal notes, edit drawer with status locked for managers).
+- Verified: build + typecheck pass; 72 new + 158 earlier access-rule checks pass; 31 browser checks in headless Edge (real page not placeholder, filters/search, Nova late-invoice factor, note, GSTIN validation, reassign manager → history, add client → invite → new owner signs in and sees no other company's projects, manager has no Add/paid-to-date/status, employee kept out, phone layouts without horizontal scroll); Week 2, 3 and 4 browser suites still pass.
+- Note for the owner: by this rule all three live demo clients are red (Terra: homepage sign-off milestone passed; Nova: invoice 17 days late; Sunrise: missed store milestones). Project health on `/admin/projects` is still a stored value, not computed by the rule, so a project can say "Needs attention" while its client is red. Compute project health from the same rule in Phase 1.
+- Not built yet: adding contracts (Week 5 finance: accepted quote → contract), client logo/brand fields, export.
+
 ### Week 5 — Finance and reports
 - Admin `/admin/finance` (Super Admin only): quotes, invoices (GST fields, sequence numbering), payments, expenses, outstanding, profit per project and client, CA export.
 - Client `/client/billing` (owner): invoices, pay button (mock), receipts, quotes and contracts to accept.
@@ -366,7 +384,7 @@ Original spec:
 
 ### Week 6 — Pipeline, people, performance
 - Admin `/admin/pipeline`: kanban stages, lead detail, activities, convert won deal to client + project.
-- Admin `/admin/clients` list + detail with health score.
+- ~~Admin `/admin/clients` list + detail with health score.~~ Done early (see "Admin clients" above).
 - Admin `/admin/people`: departments, attendance, leave approvals, workload view, scorecards.
 - Employee `/employee/performance` and `/employee/leave`; time tracking timer and weekly timesheet.
 
@@ -415,7 +433,7 @@ src/api/client.ts          only place that talks to a backend
 src/api/queries.ts         TanStack Query client, cache keys, hooks (reads + mutations)
 src/api/mock/              fake data + handlers (reference for backend access rules):
                            handlers.ts, approvals.ts, accounts.ts, chat.ts, files.ts,
-                           hours.ts, data.ts, data4.ts, art.ts
+                           clients.ts, hours.ts, data.ts, data4.ts, art.ts
 src/auth/                  AuthContext, RequireArea guard
 src/components/ui/         base components and format helpers
 src/components/status.jsx  health, task, project, deliverable, priority, visibility badges
@@ -429,7 +447,7 @@ src/pages/shared/          screens shared by several areas (MessagesPage)
 src/components/Logo.jsx    placeholder wordmark
 src/layout/                AppShell, nav per role, shell.css
 src/pages/<area>/          screens per portal area
-src/styles/                tokens.css, global.css, work.css (Week 2), week3.css, week4.css
+src/styles/                tokens.css, global.css, work.css (Week 2), week3.css, week4.css, clients.css
 ```
 
 ---
@@ -488,8 +506,8 @@ src/styles/                tokens.css, global.css, work.css (Week 2), week3.css,
 - [ ] CA review (GST invoice format, TDS) and lawyer review (privacy policy, agreements)
 
 ## 18. Current state and next action
-- Weeks 1–4 are done; `npm run build` passes. On a new machine: `npm install`, `cp .env.example .env`, `npm run dev`.
+- Weeks 1–4 and Admin clients are done; `npm run build` passes. On a new machine: `npm install`, `cp .env.example .env`, `npm run dev`.
 - Push to a private GitHub repo and connect Cloudflare Pages so reviewers see every push.
 - Git workflow: one branch per week from an up-to-date `main` (e.g. `week-5-finance`), pull request into `main`, merge, then start the next week. Never stack a week on an unmerged branch.
-- Week 5 can reuse: `files.ts` signed links for invoice PDFs, `hours.ts` for due dates, `DemoEmail` for invoice emails, ticket clocks for payment reminders.
+- Week 5 can reuse: client records (`clients.ts`: legal name, GSTIN, address for GST invoices; contracts for recurring billing; `lifetimeValue` and `outstanding` should come from real invoices/payments), `files.ts` signed links for invoice PDFs, `hours.ts` for due dates, `DemoEmail` for invoice emails, ticket clocks for payment reminders.
 - **Next: start Week 5 (finance, billing, client reports) as described in section 10.**

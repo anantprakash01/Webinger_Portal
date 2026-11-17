@@ -9,6 +9,8 @@ import { LoginPage } from '@/pages/Login';
 import { AcceptInvitePage } from '@/pages/auth/AcceptInvite';
 import { ForgotPasswordPage } from '@/pages/auth/ForgotPassword';
 import { ResetPasswordPage } from '@/pages/auth/ResetPassword';
+import { AdminClientDetail } from '@/pages/admin/AdminClientDetail';
+import { AdminClients } from '@/pages/admin/AdminClients';
 import { AdminSettings } from '@/pages/admin/AdminSettings';
 import { ClientApprovalDetail } from '@/pages/client/ClientApprovalDetail';
 import { ClientApprovals } from '@/pages/client/ClientApprovals';
@@ -39,6 +41,7 @@ const HOME = {
 /** Real screens by path. Nav items without an entry here still render <Placeholder />. */
 const PAGES = {
   '/admin/projects': AdminProjects,
+  '/admin/clients': AdminClients,
   '/client/projects': ClientProjects,
   '/employee/tasks': EmployeeTasks,
   '/employee/review': EmployeeReview,
@@ -53,7 +56,10 @@ const PAGES = {
 
 /** Detail routes that have no nav item of their own. Paths are relative to the area. */
 const DETAIL_ROUTES = {
-  admin: [{ path: 'projects/:id', Page: AdminProjectDetail }],
+  admin: [
+    { path: 'projects/:id', Page: AdminProjectDetail },
+    { path: 'clients/:id', Page: AdminClientDetail },
+  ],
   client: [
     { path: 'projects/:id', Page: ClientProjectDetail },
     { path: 'approvals/:id', Page: ClientApprovalDetail },

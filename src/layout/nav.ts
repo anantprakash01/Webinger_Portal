@@ -41,7 +41,7 @@ export const NAV: Record<Area, NavItem[]> = {
   admin: [
     { to: '/admin', label: 'Overview', icon: LuLayoutDashboard, primary: true },
     { to: '/admin/projects', label: 'Projects', icon: LuBriefcase, primary: true, week: 2 },
-    { to: '/admin/clients', label: 'Clients', icon: LuUsers, week: 2 },
+    { to: '/admin/clients', label: 'Clients', icon: LuUsers, week: 4 },
     { to: '/admin/messages', label: 'Messages', icon: LuMessageSquare, primary: true, week: 4 },
     { to: '/admin/finance', label: 'Finance', icon: LuReceipt, roles: ['SUPER_ADMIN'], week: 5 },
     { to: '/admin/pipeline', label: 'Sales pipeline', icon: LuChartColumn, week: 6 },

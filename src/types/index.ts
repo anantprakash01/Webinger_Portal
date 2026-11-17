@@ -666,3 +666,117 @@ export class ApiError extends Error {
     this.status = problem.status;
   }
 }
+
+/* ---------- Admin: clients ---------- */
+
+export type ClientStatus = 'ONBOARDING' | 'ACTIVE' | 'PAUSED' | 'ENDED';
+export type ContractStatus = 'ACTIVE' | 'ENDING_SOON' | 'ENDED';
+
+export interface ClientQuery {
+  q?: string;
+  status?: ClientStatus;
+  health?: Health;
+  accountManagerId?: string;
+}
+
+export interface ClientListItem {
+  id: string;
+  name: string;
+  industry: string;
+  city: string;
+  status: ClientStatus;
+  clientSince: string;
+  accountManager: { id: string; name: string };
+  activeProjects: number;
+  totalProjects: number;
+  services: string[];
+  health: Health;
+  /** 0–100. The level (health) follows the rule; the score only ranks clients inside a level. */
+  healthScore: number;
+  monthlyRetainer: number;
+  outstanding: number;
+  /** Earliest end date of a running contract, for renewal follow-up. */
+  renewalDue?: string;
+}
+
+export interface HealthFactor {
+  key: 'OVERDUE_TASKS' | 'SLOW_APPROVALS' | 'MISSED_MILESTONES' | 'LATE_INVOICE' | 'SATISFACTION';
+  label: string;
+  /** OK, AMBER or RED: which part of the health rule this factor trips. */
+  level: 'OK' | 'AMBER' | 'RED';
+  detail: string;
+  /** Points taken off the score (0 when OK). */
+  penalty: number;
+}
+
+export interface ClientContact {
+  id: string;
+  name: string;
+  title?: string;
+  email: string;
+  role: 'CLIENT_OWNER' | 'CLIENT_REP';
+  status: AccountStatus;
+  lastLoginAt?: string;
+  canSeeBilling: boolean;
+}
+
+export interface ClientContract {
+  id: string;
+  title: string;
+  kind: 'RETAINER' | 'PROJECT';
+  startDate: string;
+  endDate: string;
+  /** Monthly fee for retainers, total fee for one-off projects (INR, before GST). */
+  value: number;
+  revisionsPerDeliverable: number;
+  status: ContractStatus;
+}
+
+export interface ClientHistoryItem {
+  id: string;
+  at: string;
+  actor: string;
+  kind: 'CREATED' | 'CONTRACT' | 'PROJECT' | 'INVOICE' | 'APPROVAL' | 'NOTE' | 'STATUS' | 'CHANGE';
+  text: string;
+}
+
+export interface ClientDetail extends ClientListItem {
+  legalName: string;
+  gstin?: string;
+  website?: string;
+  address: string;
+  backupManager?: { id: string; name: string };
+  satisfaction?: number;
+  /** Average days from "sent for approval" to the client's decision. */
+  approvalDays?: number;
+  healthFactors: HealthFactor[];
+  contacts: ClientContact[];
+  contracts: ClientContract[];
+  projects: ProjectListItem[];
+  history: ClientHistoryItem[];
+  /** SUPER_ADMIN only: everything the client has paid. Never sent to managers. */
+  lifetimeValue?: number;
+}
+
+export interface NewClient {
+  name: string;
+  legalName: string;
+  industry: string;
+  city: string;
+  gstin?: string;
+  website?: string;
+  accountManagerId: string;
+  owner: { name: string; email: string; title?: string };
+}
+
+export interface ClientPatch {
+  industry?: string;
+  city?: string;
+  gstin?: string;
+  website?: string;
+  address?: string;
+  accountManagerId?: string;
+  backupManagerId?: string;
+  /** SUPER_ADMIN only. Pausing or ending a client is a human decision. */
+  status?: ClientStatus;
+}

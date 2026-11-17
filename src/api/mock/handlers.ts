@@ -36,6 +36,7 @@ import type {
 import { post } from './art';
 // Circular with chat.ts on purpose: both only call each other inside functions.
 import { previewsFor } from './chat';
+import { accountManagerOf } from './clients';
 import {
   approvals,
   CLIENT_NAME,
@@ -144,7 +145,7 @@ const toSummary = (p: ProjectRow): ProjectSummary => ({
   owner: nameOf(p.ownerId),
 });
 
-function toListItem(user: User, p: ProjectRow): ProjectListItem {
+export function toListItem(user: User, p: ProjectRow): ProjectListItem {
   const item: ProjectListItem = {
     ...toSummary(p),
     status: p.status,
@@ -218,7 +219,11 @@ export function clientDashboard(user: User): ClientDashboard {
   // BACKEND: billing needs the BILLING_VIEW permission (owners always; reps only if granted).
   const canSeeBilling = hasPermission(user, 'BILLING_VIEW');
   return {
-    accountManager: { name: 'Kavya Iyer', email: 'kavya@webinger.in', phone: '+91 98XXX XX210', hours: 'Mon–Sat, 10:00–19:00' },
+    // The card follows the client record (Admin → Clients → account manager).
+    accountManager: (() => {
+      const am = accountManagerOf(org) ?? userById('u-mgr')!;
+      return { name: am.name, email: am.email, phone: '+91 98XXX XX210', hours: 'Mon–Sat, 10:00–19:00' };
+    })(),
     projects: visible.slice(0, 6).map(toSummary),
     approvals: approvals
       .filter((a) => a.status === 'PENDING' && a.organisationId === org && projects.some((p) => p.id === a.projectId && canSeeProject(user, p)))
