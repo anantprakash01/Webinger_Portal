@@ -273,8 +273,8 @@ Week estimates assume one or two developers with AI assistance.
 | 1 | Scaffold, tokens, base components, API contract v0, mock layer, login, role routing, app shell, home dashboard per area | **Done** |
 | 2 | Projects and tasks | **Done** |
 | 3 | Approvals, review queue, client team, admin users & settings, password reset | **Done** |
-| 4 | Messages and files | Next |
-| 5 | Finance, billing, client reports | |
+| 4 | Messages and files | **Done** |
+| 5 | Finance, billing, client reports | Next |
 | 6 | Sales pipeline, people, performance | |
 | 7 | Influencer portal, partner portal, discovery | |
 | 8 | Automation UI, knowledge base, polish, contract freeze | |
@@ -335,7 +335,25 @@ Original spec:
 - Admin `/admin/settings`: users list, invite user (name, email, role, organisation), suspend, reset, force logout, login history; business hours, response times, approval limits.
 - Auth screens: accept invite + set password, forgot password, reset password, 2FA prompt mock.
 
-### Week 4 — Messages and files
+### Week 4 — Messages and files (Done, 2026-11-17)
+What was built (spec below kept for reference):
+- Contract v0.4.0 (49 paths): `GET /conversations`, `GET|POST /conversations/{id}/messages` (`after` cursor for catch-up), `POST /conversations/{id}/read`, `POST /messages/{id}/ticket`, `GET /tickets`, `PATCH /tickets/{id}`, `GET /availability`, `POST /uploads` (multipart), `GET /files`, `GET /files/{id}`, `POST /files/{id}/link`.
+- Mock modules: `chat.ts` (channels, messages, receipts, uploads, tickets, availability, dashboard previews), `files.ts` (vault + deliverables + signed links), `hours.ts` (business-hours maths in IST), `data4.ts` (seed). The old static `messages` list is gone; dashboards now read real chat data.
+- Live updates: `src/api/realtime.ts` is the only place that knows the transport. It polls every 4 s (inbox every 10 s), pauses while the tab is hidden, and emits `created` / `updated` events. Phase 1 swaps its body for a Spring WebSocket (STOMP) client: `/topic/conversations/{id}` and `/user/queue/inbox`, same event shapes.
+- Rules the backend must copy (all marked `BACKEND:` in the mock):
+  - One channel per project (with the client) plus a staff-only team channel. Employees see a project channel only when assigned to the project; admin area sees all; clients per project visibility (reps only their projects).
+  - Internal notes are staff-only to write and are filtered out of every client response (messages, previews, last-message line).
+  - Uploads: images, PDF, Office, CSV, TXT, ZIP up to 10 MB; an upload can be attached once, only by its uploader; max 5 per message.
+  - Tickets: staff turn a public client message into a ticket (once per message). Clocks start at the client's message and count business hours only (Settings → response times). A public staff reply stops the first-reply clock. Assigned to the project owner. Clients see their own tickets as read-only "requests".
+  - "Awaiting reply" clock on a channel (staff only) when the last public message is from the client.
+  - Files: clients see their company's CLIENT-visible vault files and deliverables of projects they can see; internal working files stay hidden. Deliverables are approvals with status APPROVED (approving in Week 3 adds the file). Download links are signed, per version, and expire after 5 minutes (410 after).
+- Screens: one `MessagesPage` for admin, employee and client (`/x/messages`, `?c=` opens a chat, `?tab=tickets`): conversation list with search, unread counts, reply clocks; thread with day separators, internal-note styling, image/file attachments, read receipts ("Seen by …"), "Make ticket"; composer with attach, Enter to send, and for staff an **Internal note / Reply to client** switch that **defaults to Internal note** (portal rule: everything defaults internal). Tickets tab with status, owner ("Take it"), first-reply and resolve clocks. Client sees a business-hours banner (offline variant out of hours). `/client/files`: folder tabs, preview cards, drawer with version history and a download link with a live 5-minute countdown.
+- Prototype aids: the other side "reads" a new client/agency message after ~5 s so receipts and polling can be seen in one tab (`simulateOtherSide` in `chat.ts`; delete with the real API). Downloads in the demo are the SVG preview or a short text note.
+- Verified: build passes; 60 new + 98 earlier access-rule checks pass; 36 Week 4 browser checks in headless Edge (client sees no internal notes or other company channels, send with Enter, receipt arrives by polling, image upload and rejected .exe, files without internal file, version history, real download, employee channel limits, internal-note default, make ticket, reply stops the clocks, resolve ticket, admin search across 46 channels, phone list ↔ thread, no horizontal scroll); Week 2 and Week 3 browser suites still pass.
+- Fixed along the way: tab strips (Segmented) could widen the whole page on phones; page sections now shrink (`.page > * { min-width: 0 }`) and tab strips scroll sideways.
+- Known limits: chat attachments from seed data (non-images) are display-only in the demo; employees have no files page yet (clients only, as planned).
+
+Original spec:
 - Messages for client, employee, admin: conversation list per project, thread view, attachments, read receipts, internal-note mode (staff only), convert message to ticket, ticket list with response-time clock, business-hours banner.
 - Mock real-time with polling; design so Spring WebSocket drops in later.
 - Client `/client/files`: brand vault (logos, fonts, guidelines), deliverables, version history, download with expiring link.
@@ -396,7 +414,8 @@ docs/api/openapi.yaml      contract shared with the Spring Boot backend
 src/api/client.ts          only place that talks to a backend
 src/api/queries.ts         TanStack Query client, cache keys, hooks (reads + mutations)
 src/api/mock/              fake data + handlers (reference for backend access rules):
-                           handlers.ts, approvals.ts, accounts.ts, data.ts, art.ts
+                           handlers.ts, approvals.ts, accounts.ts, chat.ts, files.ts,
+                           hours.ts, data.ts, data4.ts, art.ts
 src/auth/                  AuthContext, RequireArea guard
 src/components/ui/         base components and format helpers
 src/components/status.jsx  health, task, project, deliverable, priority, visibility badges
@@ -404,10 +423,13 @@ src/components/projects.jsx milestone timeline, deliverables, team, activity fee
 src/components/tasks.jsx   task drawer, kanban board, task rows
 src/components/approvals.jsx asset viewer with pins, revision meter, approval badge
 src/components/auth.jsx    auth layout, new-password fields, demo inbox
+src/components/chat.jsx    conversation list, thread, composer, response clock, hours banner
+src/api/realtime.ts        live-update transport (polling now, WebSocket in Phase 1)
+src/pages/shared/          screens shared by several areas (MessagesPage)
 src/components/Logo.jsx    placeholder wordmark
 src/layout/                AppShell, nav per role, shell.css
 src/pages/<area>/          screens per portal area
-src/styles/                tokens.css, global.css, work.css (Week 2), week3.css (Week 3)
+src/styles/                tokens.css, global.css, work.css (Week 2), week3.css, week4.css
 ```
 
 ---
@@ -466,7 +488,8 @@ src/styles/                tokens.css, global.css, work.css (Week 2), week3.css 
 - [ ] CA review (GST invoice format, TDS) and lawyer review (privacy policy, agreements)
 
 ## 18. Current state and next action
-- Weeks 1, 2 and 3 are done; `npm run build` passes. On a new machine: `npm install`, `cp .env.example .env`, `npm run dev`.
+- Weeks 1–4 are done; `npm run build` passes. On a new machine: `npm install`, `cp .env.example .env`, `npm run dev`.
 - Push to a private GitHub repo and connect Cloudflare Pages so reviewers see every push.
-- Week 4 can reuse: business hours and response times from `GET /settings` (chat banner and response clocks), the `Visibility` flag for internal notes, `DemoEmail` for notification previews, and the pinned-comment pattern for file comments.
-- **Next: start Week 4 (messages and files) as described in section 10.**
+- Git workflow: one branch per week from an up-to-date `main` (e.g. `week-5-finance`), pull request into `main`, merge, then start the next week. Never stack a week on an unmerged branch.
+- Week 5 can reuse: `files.ts` signed links for invoice PDFs, `hours.ts` for due dates, `DemoEmail` for invoice emails, ticket clocks for payment reminders.
+- **Next: start Week 5 (finance, billing, client reports) as described in section 10.**

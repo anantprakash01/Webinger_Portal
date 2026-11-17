@@ -12,6 +12,8 @@ import { ResetPasswordPage } from '@/pages/auth/ResetPassword';
 import { AdminSettings } from '@/pages/admin/AdminSettings';
 import { ClientApprovalDetail } from '@/pages/client/ClientApprovalDetail';
 import { ClientApprovals } from '@/pages/client/ClientApprovals';
+import { ClientFiles } from '@/pages/client/ClientFiles';
+import { MessagesPage } from '@/pages/shared/MessagesPage';
 import { ClientTeam } from '@/pages/client/ClientTeam';
 import { EmployeeReview } from '@/pages/employee/EmployeeReview';
 import { NotFound, Placeholder } from '@/pages/Placeholder';
@@ -43,6 +45,10 @@ const PAGES = {
   '/client/approvals': ClientApprovals,
   '/client/team': ClientTeam,
   '/admin/settings': AdminSettings,
+  '/admin/messages': MessagesPage,
+  '/client/messages': MessagesPage,
+  '/employee/messages': MessagesPage,
+  '/client/files': ClientFiles,
 };
 
 /** Detail routes that have no nav item of their own. Paths are relative to the area. */

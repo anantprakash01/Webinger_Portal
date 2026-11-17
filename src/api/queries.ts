@@ -2,6 +2,7 @@
  * TanStack Query hooks. Screens use these instead of calling `api.*` in effects.
  * Every hook still goes through `api` in ./client, so mock vs http stays one setting.
  */
+import { useEffect } from 'react';
 import { keepPreviousData, QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { QueryKey } from '@tanstack/react-query';
 import { ApiError } from '@/types';
@@ -17,7 +18,13 @@ import type {
   ApprovalDecisionInput,
   ApprovalDetail,
   ApprovalStatus,
+  ChatMessage,
   ClientTeam,
+  Conversation,
+  NewMessage,
+  NewTicket,
+  Ticket,
+  TicketPatch,
   NewPinComment,
   PortalSettings,
   RepInvite,
@@ -27,6 +34,7 @@ import type {
 } from '@/types';
 import type { Area, NewComment, ProjectQuery, TaskDetail, TaskItem, TaskPatch, TaskQuery } from '@/types';
 import { api } from './client';
+import { INBOX_POLL_MS, subscribeInbox, subscribeThread } from './realtime';
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -251,3 +259,90 @@ export function useSaveSettings() {
 /** Prototype only: the latest email sent to an address, so its link can be opened. */
 export const useDemoOutbox = (to?: string, enabled = true) =>
   useQuery({ queryKey: ['demo', 'outbox', to ?? 'all'], queryFn: () => api.demo.outbox(to), enabled, staleTime: 0 });
+
+/* ---------- Week 4: messages, tickets, files ---------- */
+
+export function useConversations() {
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ['conversations'], queryFn: api.messages.conversations });
+  useEffect(() => subscribeInbox(() => void qc.invalidateQueries({ queryKey: ['conversations'] })), [qc]);
+  return q;
+}
+
+type PendingMessage = ChatMessage & { pending?: boolean };
+
+/** Messages of one conversation, kept live by the realtime layer. */
+export function useThread(conversationId: string | null) {
+  const qc = useQueryClient();
+  const key = ['thread', conversationId];
+  const q = useQuery({ queryKey: key, queryFn: () => api.messages.list(conversationId!), enabled: !!conversationId });
+  useEffect(() => {
+    if (!conversationId) return undefined;
+    return subscribeThread(conversationId, (e) =>
+      qc.setQueryData<PendingMessage[]>(['thread', conversationId], (old = []) => {
+        const i = old.findIndex((m) => m.id === e.message.id);
+        if (i >= 0) return old.map((m, j) => (j === i ? e.message : m));
+        return [...old.filter((m) => !m.pending), e.message, ...old.filter((m) => m.pending)];
+      }),
+    );
+  }, [conversationId, qc]);
+  return q;
+}
+
+export function useSendMessage(conversationId: string) {
+  const qc = useQueryClient();
+  const key = ['thread', conversationId];
+  return useMutation({
+    mutationFn: (vars: { body: NewMessage; optimistic: PendingMessage }) => api.messages.send(conversationId, vars.body),
+    // Show the message straight away; swap in the stored one when the server answers.
+    onMutate: ({ optimistic }) => qc.setQueryData<PendingMessage[]>(key, (old = []) => [...old, optimistic]),
+    onSuccess: (saved, { optimistic }) =>
+      qc.setQueryData<PendingMessage[]>(key, (old = []) => {
+        const rest = old.filter((m) => m.id !== optimistic.id && m.id !== saved.id);
+        return [...rest, saved];
+      }),
+    onError: (_e, { optimistic }) => qc.setQueryData<PendingMessage[]>(key, (old = []) => old.filter((m) => m.id !== optimistic.id)),
+    onSettled: () => void qc.invalidateQueries({ queryKey: ['conversations'] }),
+  });
+}
+
+export function useMarkRead(conversationId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (upToId: string) => api.messages.markRead(conversationId, upToId),
+    onSuccess: () => {
+      qc.setQueryData<Conversation[]>(['conversations'], (old) => old?.map((c) => (c.id === conversationId ? { ...c, unreadCount: 0 } : c)));
+      void qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+}
+
+export function useCreateTicket(conversationId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ messageId, body }: { messageId: string; body: NewTicket }) => api.messages.toTicket(messageId, body),
+    onSuccess: (t) => {
+      qc.setQueryData<ChatMessage[]>(['thread', conversationId], (old) =>
+        old?.map((m) => (m.id === t.messageId ? { ...m, ticketId: t.id, ticketNumber: t.number } : m)),
+      );
+      void qc.invalidateQueries({ queryKey: ['tickets'] });
+      void qc.invalidateQueries({ queryKey: ['conversations'] });
+    },
+  });
+}
+
+export const useTickets = () => useQuery({ queryKey: ['tickets'], queryFn: () => api.tickets.list(), refetchInterval: INBOX_POLL_MS });
+
+export function useUpdateTicket() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: TicketPatch }) => api.tickets.update(id, patch),
+    onSuccess: (t) => qc.setQueryData<Ticket[]>(['tickets'], (old) => old?.map((x) => (x.id === t.id ? t : x))),
+    onSettled: () => void qc.invalidateQueries({ queryKey: ['conversations'] }),
+  });
+}
+
+export const useAvailability = () => useQuery({ queryKey: ['availability'], queryFn: api.messages.availability, staleTime: 60_000 });
+
+export const useFiles = () => useQuery({ queryKey: ['files'], queryFn: () => api.files.list() });
+export const useFile = (id: string | null) => useQuery({ queryKey: ['files', id], queryFn: () => api.files.get(id!), enabled: !!id });

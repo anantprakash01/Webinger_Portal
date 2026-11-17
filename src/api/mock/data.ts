@@ -709,10 +709,3 @@ export const approvals: ApprovalRow[] = [
     comments: [],
   },
 ];
-
-export const messages = [
-  { id: 'm1', organisationId: ORG.TERRA, toUserId: 'u-client', from: 'Priya Sharma', projectName: 'Social media retainer', text: 'Week 1 designs are ready for your review.', at: ago(3), unread: true },
-  { id: 'm2', organisationId: ORG.TERRA, toUserId: 'u-client', from: 'Kavya Iyer', projectName: 'Website redesign', text: 'Can we get 15 minutes tomorrow on the homepage?', at: ago(26), unread: false },
-  { id: 'm3', organisationId: ORG.TERRA, toUserId: 'u-emp', from: 'Arjun Kapoor (Terra Foods)', projectName: 'Social media retainer', text: 'Please use the new logo from the brand vault.', at: ago(1), unread: true },
-  { id: 'm4', organisationId: ORG.NOVA, toUserId: 'u-emp', from: 'Sameer Joshi (Nova Clinics)', projectName: 'Lead generation ads', text: 'Leads dropped this week, can you check?', at: ago(5), unread: true },
-];
