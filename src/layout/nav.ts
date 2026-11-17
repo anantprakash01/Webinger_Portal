@@ -21,7 +21,7 @@ import {
   LuWallet,
   LuWorkflow,
 } from 'react-icons/lu';
-import type { Area, Role } from '@/types';
+import type { Area, Permission, Role, User } from '@/types';
 
 export interface NavItem {
   to: string;
@@ -31,6 +31,8 @@ export interface NavItem {
   primary?: boolean;
   /** Restrict to some roles inside an area, e.g. finance for Super Admin only. */
   roles?: Role[];
+  /** Or require a grant, e.g. billing for a client rep the owner allowed. */
+  permission?: Permission;
   /** Week the real screen is planned, shown on placeholder pages. */
   week?: number;
 }
@@ -55,7 +57,7 @@ export const NAV: Record<Area, NavItem[]> = {
     { to: '/client/messages', label: 'Messages', icon: LuMessageSquare, primary: true, week: 4 },
     { to: '/client/files', label: 'Files & brand vault', icon: LuFolderOpen, week: 4 },
     { to: '/client/reports', label: 'Reports', icon: LuChartColumn, week: 5 },
-    { to: '/client/billing', label: 'Billing', icon: LuReceipt, roles: ['CLIENT_OWNER'], week: 5 },
+    { to: '/client/billing', label: 'Billing', icon: LuReceipt, permission: 'BILLING_VIEW', week: 5 },
     { to: '/client/influencers', label: 'Influencers', icon: LuSparkles, week: 7 },
     { to: '/client/team', label: 'My team', icon: LuUsers, roles: ['CLIENT_OWNER'], week: 3 },
   ],
@@ -81,7 +83,9 @@ export const NAV: Record<Area, NavItem[]> = {
   ],
 };
 
-export const navFor = (area: Area, role: Role) => NAV[area].filter((i) => !i.roles || i.roles.includes(role));
+export const canSee = (user: User, i: NavItem) =>
+  (!i.roles || i.roles.includes(user.role)) && (!i.permission || !!user.permissions?.includes(i.permission));
+export const navFor = (area: Area, user: User) => NAV[area].filter((i) => canSee(user, i));
 
 export const AREA_TITLE: Record<Area, string> = {
   admin: 'Admin',

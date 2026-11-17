@@ -12,6 +12,19 @@ import type {
   InfluencerDashboard,
   PartnerDashboard,
 } from '@/types';
+import type {
+  AdminUserQuery,
+  ApprovalDecisionInput,
+  ApprovalDetail,
+  ApprovalStatus,
+  ClientTeam,
+  NewPinComment,
+  PortalSettings,
+  RepInvite,
+  RepPatch,
+  ReviewInput,
+  UserInvite,
+} from '@/types';
 import type { Area, NewComment, ProjectQuery, TaskDetail, TaskItem, TaskPatch, TaskQuery } from '@/types';
 import { api } from './client';
 
@@ -132,3 +145,107 @@ export function useAddComment() {
     },
   });
 }
+
+/* ---------- Week 3: review, approvals, team, admin ---------- */
+
+export function useReviewTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: ReviewInput }) => api.tasks.review(id, body),
+    onSuccess: (task) => qc.setQueryData(keys.task(task.id), task),
+    onSettled: () => {
+      refreshAfterTaskWrite(qc);
+      void qc.invalidateQueries({ queryKey: ['approvals'] });
+    },
+  });
+}
+
+export const useApprovals = (q: { status?: ApprovalStatus; projectId?: string } = {}) =>
+  useQuery({ queryKey: ['approvals', 'list', q], queryFn: () => api.approvals.list(q) });
+
+export const useApproval = (id: string) => useQuery({ queryKey: ['approvals', 'detail', id], queryFn: () => api.approvals.get(id) });
+
+export function useDecideApproval() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: ApprovalDecisionInput }) => api.approvals.decide(id, body),
+    onSuccess: (detail) => qc.setQueryData(['approvals', 'detail', detail.id], detail),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ['approvals'] });
+      void qc.invalidateQueries({ queryKey: ['projects'] });
+      void qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+}
+
+export function useAddPin() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: NewPinComment }) => api.approvals.comment(id, body),
+    onSuccess: (pin, { id }) => {
+      qc.setQueryData<ApprovalDetail>(['approvals', 'detail', id], (old) =>
+        old ? { ...old, comments: [...old.comments, pin], commentCount: old.commentCount + 1 } : old,
+      );
+      void qc.invalidateQueries({ queryKey: ['approvals', 'list'] });
+    },
+  });
+}
+
+export const useClientTeam = () => useQuery({ queryKey: ['clientTeam'], queryFn: api.clientTeam.get });
+
+export function useInviteRep() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: RepInvite) => api.clientTeam.invite(body),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['clientTeam'] }),
+  });
+}
+
+export function useUpdateRep() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: RepPatch }) => api.clientTeam.update(id, patch),
+    onSuccess: (member) =>
+      qc.setQueryData<ClientTeam>(['clientTeam'], (old) =>
+        old ? { ...old, members: old.members.map((m) => (m.id === member.id ? member : m)) } : old,
+      ),
+  });
+}
+
+export const useAdminUsers = (q: AdminUserQuery) =>
+  useQuery({ queryKey: ['admin', 'users', q], queryFn: () => api.admin.users(q), placeholderData: keepPreviousData });
+export const useOrganisations = () => useQuery({ queryKey: ['admin', 'orgs'], queryFn: api.admin.organisations, staleTime: Infinity });
+export const useLoginHistory = (userId?: string) =>
+  useQuery({ queryKey: ['admin', 'logins', userId ?? 'all'], queryFn: () => api.admin.loginHistory(userId) });
+
+/** One hook for the per-user admin actions; each refreshes the users list and login history. */
+export function useAdminAction() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ action, id }: { action: 'approve' | 'suspend' | 'reactivate' | 'resetPassword' | 'forceLogout'; id: string }) =>
+      api.admin[action](id) as Promise<unknown>,
+    onSettled: () => void qc.invalidateQueries({ queryKey: ['admin'] }),
+  });
+}
+
+export function useInviteUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: UserInvite) => api.admin.invite(body),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['admin', 'users'] }),
+  });
+}
+
+export const useSettings = () => useQuery({ queryKey: ['settings'], queryFn: api.settings.get });
+
+export function useSaveSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: PortalSettings) => api.settings.save(body),
+    onSuccess: (s) => qc.setQueryData(['settings'], s),
+  });
+}
+
+/** Prototype only: the latest email sent to an address, so its link can be opened. */
+export const useDemoOutbox = (to?: string, enabled = true) =>
+  useQuery({ queryKey: ['demo', 'outbox', to ?? 'all'], queryFn: () => api.demo.outbox(to), enabled, staleTime: 0 });

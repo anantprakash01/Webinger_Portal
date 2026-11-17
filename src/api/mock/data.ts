@@ -9,8 +9,16 @@
  * Arrays are mutable on purpose: PATCH and POST handlers change them in memory,
  * so the prototype behaves like a real backend until the page is reloaded.
  */
+import { docPage, post, webPage } from './art';
 import type {
+  AccountStatus,
   ActivityItem,
+  ApprovalStatus,
+  AssetKind,
+  AssetVersion,
+  LoginEvent,
+  PinComment,
+  PortalSettings,
   ChecklistItem,
   Deliverable,
   Health,
@@ -49,6 +57,32 @@ export const CLIENT_NAME: Record<string, string> = {
   [ORG.SUNRISE]: 'Sunrise Retail Group',
 };
 
+/**
+ * Account row as the backend stores it. Only the User fields ever leave the API;
+ * status, MFA and session data are for the admin screens and the auth checks.
+ * Passwords are never stored here (see `passwords` below; Phase 1: BCrypt hashes).
+ */
+export interface UserRow extends User {
+  status: AccountStatus;
+  mfaEnabled: boolean;
+  createdAt: string;
+  lastLoginAt?: string;
+  /** Sessions issued before this moment are rejected (force logout). */
+  sessionsRevokedAt?: string;
+  /** Client reps only: owner granted billing access. */
+  canSeeBilling?: boolean;
+  invitedBy?: string;
+}
+
+const acct = (u: User, extra: Partial<UserRow> = {}): UserRow => ({
+  status: 'ACTIVE',
+  mfaEnabled: u.role === 'SUPER_ADMIN' || u.role === 'MANAGER',
+  createdAt: ago(24 * 200),
+  lastLoginAt: ago(5 + u.id.length),
+  ...u,
+  ...extra,
+});
+
 const staff = (id: string, name: string, title: string, email: string): User => ({
   id,
   name,
@@ -59,23 +93,68 @@ const staff = (id: string, name: string, title: string, email: string): User => 
   title,
 });
 
-export const users: User[] = [
-  { id: 'u-admin', name: 'Rohan Mehta', email: 'admin@webinger.in', role: 'SUPER_ADMIN', organisationId: ORG.WEBINGER, organisationName: 'Webinger', title: 'Founder' },
-  { id: 'u-mgr', name: 'Kavya Iyer', email: 'manager@webinger.in', role: 'MANAGER', organisationId: ORG.WEBINGER, organisationName: 'Webinger', title: 'Operations Head' },
-  { id: 'u-emp', name: 'Priya Sharma', email: 'priya@webinger.in', role: 'EMPLOYEE', organisationId: ORG.WEBINGER, organisationName: 'Webinger', title: 'Social Media Executive' },
-  staff('u-rahul', 'Rahul Nair', 'SEO Specialist', 'rahul@webinger.in'),
-  staff('u-meera', 'Meera Pillai', 'Graphic Designer', 'meera@webinger.in'),
-  staff('u-vikram', 'Vikram Singh', 'Performance Marketer', 'vikram@webinger.in'),
-  staff('u-aarav', 'Aarav Desai', 'Content Writer', 'aarav@webinger.in'),
-  { id: 'u-client', name: 'Arjun Kapoor', email: 'arjun@terrafoods.in', role: 'CLIENT_OWNER', organisationId: ORG.TERRA, organisationName: 'Terra Foods', title: 'Marketing Head' },
-  { id: 'u-rep', name: 'Neha Verma', email: 'neha@terrafoods.in', role: 'CLIENT_REP', organisationId: ORG.TERRA, organisationName: 'Terra Foods', title: 'Brand Executive' },
-  { id: 'u-client2', name: 'Sameer Joshi', email: 'sameer@novaclinics.in', role: 'CLIENT_OWNER', organisationId: ORG.NOVA, organisationName: 'Nova Clinics', title: 'Director' },
-  { id: 'u-client3', name: 'Farah Siddiqui', email: 'farah@sunriseretail.in', role: 'CLIENT_OWNER', organisationId: ORG.SUNRISE, organisationName: 'Sunrise Retail Group', title: 'Head of Marketing' },
-  { id: 'u-inf', name: 'Ananya Rao', email: 'ananya@creator.in', role: 'INFLUENCER', organisationId: ORG.CREATOR, organisationName: 'Ananya Rao', title: 'Food & lifestyle creator' },
-  { id: 'u-partner', name: 'Lensworks Studio', email: 'hello@lensworks.in', role: 'PARTNER', organisationId: ORG.VENDOR, organisationName: 'Lensworks Studio', title: 'Photography vendor' },
+export const users: UserRow[] = [
+  acct({ id: 'u-admin', name: 'Rohan Mehta', email: 'admin@webinger.in', role: 'SUPER_ADMIN', organisationId: ORG.WEBINGER, organisationName: 'Webinger', title: 'Founder' }),
+  acct({ id: 'u-admin2', name: 'Isha Mehta', email: 'isha@webinger.in', role: 'SUPER_ADMIN', organisationId: ORG.WEBINGER, organisationName: 'Webinger', title: 'Co-founder (backup owner)' }, { lastLoginAt: ago(50) }),
+  acct({ id: 'u-mgr', name: 'Kavya Iyer', email: 'manager@webinger.in', role: 'MANAGER', organisationId: ORG.WEBINGER, organisationName: 'Webinger', title: 'Operations Head' }),
+  acct({ id: 'u-emp', name: 'Priya Sharma', email: 'priya@webinger.in', role: 'EMPLOYEE', organisationId: ORG.WEBINGER, organisationName: 'Webinger', title: 'Social Media Executive' }),
+  acct(staff('u-rahul', 'Rahul Nair', 'SEO Specialist', 'rahul@webinger.in')),
+  acct(staff('u-meera', 'Meera Pillai', 'Graphic Designer', 'meera@webinger.in')),
+  acct(staff('u-vikram', 'Vikram Singh', 'Performance Marketer', 'vikram@webinger.in')),
+  acct(staff('u-aarav', 'Aarav Desai', 'Content Writer', 'aarav@webinger.in')),
+  acct({ id: 'u-client', name: 'Arjun Kapoor', email: 'arjun@terrafoods.in', role: 'CLIENT_OWNER', organisationId: ORG.TERRA, organisationName: 'Terra Foods', title: 'Marketing Head' }),
+  acct({ id: 'u-rep', name: 'Neha Verma', email: 'neha@terrafoods.in', role: 'CLIENT_REP', organisationId: ORG.TERRA, organisationName: 'Terra Foods', title: 'Brand Executive' }),
+  acct({ id: 'u-client2', name: 'Sameer Joshi', email: 'sameer@novaclinics.in', role: 'CLIENT_OWNER', organisationId: ORG.NOVA, organisationName: 'Nova Clinics', title: 'Director' }),
+  acct({ id: 'u-client3', name: 'Farah Siddiqui', email: 'farah@sunriseretail.in', role: 'CLIENT_OWNER', organisationId: ORG.SUNRISE, organisationName: 'Sunrise Retail Group', title: 'Head of Marketing' }),
+  acct({ id: 'u-inf', name: 'Ananya Rao', email: 'ananya@creator.in', role: 'INFLUENCER', organisationId: ORG.CREATOR, organisationName: 'Ananya Rao', title: 'Food & lifestyle creator' }),
+  acct({ id: 'u-partner', name: 'Lensworks Studio', email: 'hello@lensworks.in', role: 'PARTNER', organisationId: ORG.VENDOR, organisationName: 'Lensworks Studio', title: 'Photography vendor' }),
+  // Week 3 demo cases: an invited employee, a rep waiting for admin approval, a suspended ex-employee.
+  acct(staff('u-new', 'Divya Menon', 'Video Editor', 'divya@webinger.in'), { status: 'INVITED', lastLoginAt: undefined, createdAt: ago(30) }),
+  acct({ id: 'u-rep2', name: 'Karan Malhotra', email: 'karan@terrafoods.in', role: 'CLIENT_REP', organisationId: ORG.TERRA, organisationName: 'Terra Foods', title: 'Social Media Coordinator' }, { status: 'PENDING_APPROVAL', lastLoginAt: undefined, createdAt: ago(20), invitedBy: 'Arjun Kapoor' }),
+  acct(staff('u-old', 'Nikhil Rao', 'Former Designer', 'nikhil@webinger.in'), { status: 'SUSPENDED', lastLoginAt: ago(24 * 40) }),
 ];
 export const userById = (id: string) => users.find((u) => u.id === id);
 export const nameOf = (id: string) => userById(id)?.name ?? 'Unassigned';
+
+export const organisations = [
+  { id: ORG.WEBINGER, name: 'Webinger', kind: 'AGENCY' as const },
+  { id: ORG.TERRA, name: 'Terra Foods', kind: 'CLIENT' as const },
+  { id: ORG.NOVA, name: 'Nova Clinics', kind: 'CLIENT' as const },
+  { id: ORG.SUNRISE, name: 'Sunrise Retail Group', kind: 'CLIENT' as const },
+  { id: ORG.CREATOR, name: 'Ananya Rao', kind: 'INFLUENCER' as const },
+  { id: ORG.VENDOR, name: 'Lensworks Studio', kind: 'PARTNER' as const },
+];
+
+/** Demo two-step code. Phase 1: TOTP from an authenticator app. */
+export const DEMO_MFA_CODE = '123456';
+
+/** Passwords set through invite or reset links. Everyone else uses DEMO_PASSWORD. Phase 1: BCrypt hashes in MySQL. */
+export const passwords = new Map<string, string>();
+
+/** One-time tokens for invite, password-reset and two-step links. */
+export const tokens = new Map<string, { userId: string; purpose: 'INVITE' | 'RESET' | 'MFA'; expiresAt: number; used: boolean }>();
+
+/** Emails the system would have sent. Demo only, so links can be opened without an inbox. */
+export const outbox: Array<{ id: string; to: string; subject: string; body: string; link?: string; at: string }> = [];
+
+export const loginEvents: LoginEvent[] = [
+  { id: 'le1', userId: 'u-admin', userName: 'Rohan Mehta', email: 'admin@webinger.in', at: ago(2), result: 'SUCCESS', ip: '103.21.58.14', device: 'Chrome on Windows' },
+  { id: 'le2', userId: 'u-client', userName: 'Arjun Kapoor', email: 'arjun@terrafoods.in', at: ago(4), result: 'SUCCESS', ip: '49.36.112.7', device: 'Safari on iPhone' },
+  { id: 'le3', userId: 'u-emp', userName: 'Priya Sharma', email: 'priya@webinger.in', at: ago(6), result: 'SUCCESS', ip: '103.21.58.20', device: 'Edge on Windows' },
+  { id: 'le4', userName: 'Unknown', email: 'admin@webinger.co', at: ago(9), result: 'FAILED', ip: '185.220.101.4', device: 'curl' },
+  { id: 'le5', userId: 'u-mgr', userName: 'Kavya Iyer', email: 'manager@webinger.in', at: ago(11.2), result: 'MFA_FAILED', ip: '103.21.58.22', device: 'Chrome on macOS' },
+  { id: 'le6', userId: 'u-mgr', userName: 'Kavya Iyer', email: 'manager@webinger.in', at: ago(11), result: 'SUCCESS', ip: '103.21.58.22', device: 'Chrome on macOS' },
+  { id: 'le7', userId: 'u-old', userName: 'Nikhil Rao', email: 'nikhil@webinger.in', at: ago(30), result: 'LOCKED', ip: '157.48.3.90', device: 'Chrome on Android' },
+  { id: 'le8', userId: 'u-client2', userName: 'Sameer Joshi', email: 'sameer@novaclinics.in', at: ago(28), result: 'SUCCESS', ip: '106.51.77.2', device: 'Chrome on Android' },
+];
+
+export const settings: PortalSettings = {
+  businessHours: { days: [1, 2, 3, 4, 5, 6], open: '10:00', close: '19:00', timezone: 'Asia/Kolkata' },
+  responseTimes: { firstReplyHours: 4, ticketResolutionHours: 48 },
+  approvalLimits: { managerDiscountPercent: 5, managerSpendLimit: 25000, deputyPayoutLimit: 30000 },
+  defaultRevisions: 3,
+  reminderAfterDays: 2,
+};
 
 /** Which demo account to offer per role on the login screen. */
 export const demoAccounts: Array<{ role: Role; email: string; note?: string }> = [
@@ -277,6 +356,7 @@ const handWritten: ProjectRow[] = [
       dl('p4d1', 'Conversion tracking', 'APPROVED', -24, 'p4m1'),
       dl('p4d2', 'Ad creatives set B', 'IN_PROGRESS', -1, 'p4m2', 3, 3),
       dl('p4d3', 'Landing page refresh', 'IN_REVIEW', 2, 'p4m2'),
+      dl('p4d4', 'Landing page hero banner', 'CLIENT_APPROVAL', 2, 'p4m2', 3, 3),
     ],
     activity: [
       act('p4a1', 5, 'Sameer Joshi', 'Reported that leads dropped this week'),
@@ -378,6 +458,10 @@ export interface TaskRow {
   assigneeId: string;
   reviewerId?: string;
   clientFacing: boolean;
+  /** The deliverable this task produces. Passing review sends it to the client for approval. */
+  deliverableId?: string;
+  /** Times sent back by the reviewer. Feeds the first-pass quality measure. */
+  reviewFailures: number;
   checklist: ChecklistItem[];
   files: TaskFile[];
   comments: TaskComment[];
@@ -407,14 +491,15 @@ const cm = (authorId: string, hoursAgo: number, text: string, visibility: TaskCo
   visibility,
 });
 
-type TaskSeed = Omit<TaskRow, 'description' | 'checklist' | 'files' | 'comments' | 'createdAt' | 'clientFacing'> &
-  Partial<Pick<TaskRow, 'description' | 'checklist' | 'files' | 'comments' | 'clientFacing'>> & { created?: number };
+type TaskSeed = Omit<TaskRow, 'description' | 'checklist' | 'files' | 'comments' | 'createdAt' | 'clientFacing' | 'reviewFailures'> &
+  Partial<Pick<TaskRow, 'description' | 'checklist' | 'files' | 'comments' | 'clientFacing' | 'reviewFailures'>> & { created?: number };
 const task = (t: TaskSeed): TaskRow => ({
   description: '',
   checklist: [],
   files: [],
   comments: [],
   clientFacing: false,
+  reviewFailures: 0,
   ...t,
   createdAt: ago((t.created ?? 5) * 24),
 });
@@ -422,8 +507,8 @@ const task = (t: TaskSeed): TaskRow => ({
 const handTasks: TaskRow[] = [
   task({
     id: 't1', projectId: 'p1', assigneeId: 'u-emp', reviewerId: 'u-meera', clientFacing: true,
-    title: 'Design 6 Instagram posts for week 1', status: 'IN_PROGRESS', priority: 'HIGH', due: day(0),
-    description: 'Six feed posts for the first week of December. Use the winter palette from the brand vault and the new logo lock-up. Post 4 needs the revised offer price.',
+    title: 'Design 6 Instagram posts for week 2', status: 'IN_PROGRESS', priority: 'HIGH', due: day(0),
+    description: 'Six feed posts for the second week of December. Use the winter palette from the brand vault and the new logo lock-up. Post 4 needs the revised offer price.',
     checklist: cl(['Pull product photos from the brand vault', true], ['Draft layouts in Figma', true], 'Apply new logo to all six', 'Export 1080 × 1350 PNGs', 'Send to Meera for review'),
     files: [file('week1-posts-v1.fig', 4200, 'Priya Sharma', 26), file('client-feedback-post4.png', 310, 'Arjun Kapoor', 20, 'CLIENT')],
     comments: [
@@ -459,7 +544,7 @@ const handTasks: TaskRow[] = [
     description: '30-second reel script for the festive combo offer. Hook in the first 2 seconds.',
   }),
   task({
-    id: 't6', projectId: 'p3', assigneeId: 'u-aarav', reviewerId: 'u-emp', clientFacing: true,
+    id: 't6', projectId: 'p3', assigneeId: 'u-aarav', reviewerId: 'u-emp', clientFacing: true, deliverableId: 'p3d2',
     title: 'Blog post: winter recipes', status: 'IN_REVIEW', priority: 'MEDIUM', due: day(1),
     description: '1,200-word post targeting "winter recipes with millets". Include 3 Terra Foods products.',
     files: [file('winter-recipes-draft.docx', 64, 'Aarav Desai', 8)],
@@ -470,13 +555,13 @@ const handTasks: TaskRow[] = [
     checklist: cl(['Instagram', true], ['Facebook', true]),
   }),
   task({
-    id: 't8', projectId: 'p1', assigneeId: 'u-emp', reviewerId: 'u-meera', clientFacing: true,
+    id: 't8', projectId: 'p1', assigneeId: 'u-emp', reviewerId: 'u-meera', clientFacing: true, deliverableId: 'p1d5',
     title: 'December content calendar', status: 'IN_REVIEW', priority: 'HIGH', due: day(1),
     description: '16 posts and 8 reels across December. Mark festive dates.',
     files: [file('dec-calendar.xlsx', 48, 'Priya Sharma', 10)],
   }),
   task({
-    id: 't9', projectId: 'p4', assigneeId: 'u-emp', reviewerId: 'u-vikram', clientFacing: true,
+    id: 't9', projectId: 'p4', assigneeId: 'u-emp', reviewerId: 'u-vikram', clientFacing: true, deliverableId: 'p4d4', reviewFailures: 1,
     title: 'Landing page hero banner', status: 'CLIENT_APPROVAL', priority: 'MEDIUM', due: day(2),
     files: [file('nova-hero-v3.png', 640, 'Priya Sharma', 30, 'CLIENT')],
   }),
@@ -486,14 +571,23 @@ const handTasks: TaskRow[] = [
   }),
   task({ id: 't11', projectId: 'p1', assigneeId: 'u-emp', title: 'Story templates for December', status: 'DONE', priority: 'MEDIUM', due: day(-4), clientFacing: true, reviewerId: 'u-meera' }),
   task({ id: 't12', projectId: 'p2', assigneeId: 'u-meera', reviewerId: 'u-mgr', clientFacing: true, title: 'Menu page design', status: 'IN_PROGRESS', priority: 'HIGH', due: day(8) }),
-  task({ id: 't13', projectId: 'p2', assigneeId: 'u-aarav', reviewerId: 'u-mgr', clientFacing: true, title: 'Homepage copy', status: 'IN_REVIEW', priority: 'MEDIUM', due: day(2) }),
+  task({ id: 't13', projectId: 'p2', assigneeId: 'u-aarav', reviewerId: 'u-mgr', clientFacing: true, deliverableId: 'p2d5', title: 'Homepage copy', status: 'IN_REVIEW', priority: 'MEDIUM', due: day(2) }),
   task({ id: 't14', projectId: 'p2', assigneeId: 'u-meera', title: 'Prepare design tokens for developer', status: 'TODO', priority: 'LOW', due: day(30) }),
   task({ id: 't15', projectId: 'p2', assigneeId: 'u-mgr', title: 'Chase homepage approval', status: 'TODO', priority: 'HIGH', due: day(-1) }),
   task({ id: 't16', projectId: 'p3', assigneeId: 'u-rahul', title: 'November ranking report', status: 'TODO', priority: 'MEDIUM', due: day(8), clientFacing: true, reviewerId: 'u-mgr' }),
   task({ id: 't17', projectId: 'p3', assigneeId: 'u-rahul', title: 'Build 20 local citations', status: 'DONE', priority: 'LOW', due: day(-10) }),
   task({ id: 't18', projectId: 'p4', assigneeId: 'u-vikram', title: 'Rebuild audience segments', status: 'IN_PROGRESS', priority: 'HIGH', due: day(-2) }),
   task({ id: 't19', projectId: 'p4', assigneeId: 'u-vikram', reviewerId: 'u-mgr', clientFacing: true, title: 'Weekly lead report', status: 'TODO', priority: 'MEDIUM', due: day(3) }),
-  task({ id: 't20', projectId: 'p5', assigneeId: 'u-meera', reviewerId: 'u-mgr', clientFacing: true, title: 'Brand book pages 19–30', status: 'IN_PROGRESS', priority: 'HIGH', due: day(4) }),
+  task({ id: 't20', projectId: 'p5', assigneeId: 'u-meera', reviewerId: 'u-mgr', clientFacing: true, deliverableId: 'p5d2', title: 'Brand book pages 19–30', status: 'IN_PROGRESS', priority: 'HIGH', due: day(4) }),
+  task({
+    id: 't22', projectId: 'p1', assigneeId: 'u-emp', reviewerId: 'u-meera', clientFacing: true, deliverableId: 'p1d3',
+    title: 'Week 1 post designs (6)', status: 'CLIENT_APPROVAL', priority: 'HIGH', due: day(1), reviewFailures: 1,
+    description: 'Six posts for the first week of December. Version 2 uses the new logo lock-up the client asked for.',
+  }),
+  task({
+    id: 't23', projectId: 'p2', assigneeId: 'u-meera', reviewerId: 'u-mgr', clientFacing: true, deliverableId: 'p2d3',
+    title: 'Homepage design', status: 'CLIENT_APPROVAL', priority: 'HIGH', due: day(-2),
+  }),
   task({ id: 't21', projectId: 'p5', assigneeId: 'u-meera', title: 'Package source files', status: 'TODO', priority: 'LOW', due: day(6) }),
 ];
 
@@ -502,7 +596,7 @@ const generatedTasks: TaskRow[] = generated.flatMap((p, i) => {
   const lead = p.memberIds[0];
   return [
     task({
-      id: `${p.id}t1`, projectId: p.id, assigneeId: lead, reviewerId: 'u-mgr', clientFacing: true,
+      id: `${p.id}t1`, projectId: p.id, assigneeId: lead, reviewerId: 'u-mgr', clientFacing: true, deliverableId: p.deliverables[0].id,
       title: `${p.deliverables[0].title}`, status: (['TODO', 'IN_PROGRESS', 'IN_REVIEW'] as const)[i % 3], priority: 'MEDIUM',
       due: p.deliverables[0].due,
     }),
@@ -523,9 +617,97 @@ export const invoices: Array<InvoiceSummary & { organisationId: string }> = [
   { id: 'i3', organisationId: ORG.NOVA, number: 'WEB/2026-27/0105', clientName: 'Nova Clinics', amount: 35400, due: day(-4), status: 'OVERDUE' },
 ];
 
-export const approvals = [
-  { id: 'a1', organisationId: ORG.TERRA, title: 'Week 1 post designs (6)', projectName: 'Social media retainer', submittedAt: ago(20), revisionsUsed: 1, revisionsAllowed: 3 },
-  { id: 'a2', organisationId: ORG.TERRA, title: 'Homepage design v2', projectName: 'Website redesign', submittedAt: ago(98), revisionsUsed: 2, revisionsAllowed: 3 },
+/* --------------------------------------------------------------- approvals */
+
+export interface ApprovalRow {
+  id: string;
+  organisationId: string;
+  projectId: string;
+  deliverableId: string;
+  title: string;
+  kind: AssetKind;
+  status: ApprovalStatus;
+  revisionsUsed: number;
+  revisionsAllowed: number;
+  versions: AssetVersion[];
+  comments: PinComment[];
+}
+
+const ver = (
+  id: string,
+  number: number,
+  fileName: string,
+  pages: string[],
+  hoursAgo: number,
+  by: string,
+  decision?: AssetVersion['decision'],
+  note?: string,
+): AssetVersion => ({ id, number, fileName, pages, submittedAt: ago(hoursAgo), submittedBy: by, decision, note });
+const decided = (status: 'APPROVED' | 'CHANGES_REQUESTED', byName: string, hoursAgo: number, note?: string) => ({ status, byName, at: ago(hoursAgo), note });
+const pin = (id: string, versionId: string, page: number, x: number, y: number, authorId: string, hoursAgo: number, text: string): PinComment => {
+  const u = userById(authorId)!;
+  return { id, versionId, page, x, y, authorId, author: u.name, fromAgency: u.organisationId === ORG.WEBINGER, at: ago(hoursAgo), text };
+};
+const posts = (headlines: string[], brand: string, variant: number) => headlines.map((h, i) => post(h, brand, i + 1, variant));
+const WEEK1 = ['Winter is here', 'Millet magic', 'Fresh from farms', 'Combo at ₹299', 'Meet our growers', 'Weekend brunch'];
+const HERO_NOTES = ['Too clinical.', 'Use our clinic photos.', 'Headline font too thin.'];
+
+export const approvals: ApprovalRow[] = [
+  {
+    id: 'a1', organisationId: ORG.TERRA, projectId: 'p1', deliverableId: 'p1d3', title: 'Week 1 post designs (6)', kind: 'IMAGE',
+    status: 'PENDING', revisionsUsed: 1, revisionsAllowed: 3,
+    versions: [
+      ver('a1v1', 1, 'week1-posts-v1.zip', posts(WEEK1, 'TERRA', 0), 60, 'Priya Sharma', decided('CHANGES_REQUESTED', 'Arjun Kapoor', 44, 'Please use the new logo from the brand vault, and post 4 price should be ₹299.')),
+      ver('a1v2', 2, 'week1-posts-v2.zip', posts(WEEK1, 'TERRA', 1), 20, 'Priya Sharma', undefined, 'New logo on all six, price fixed on post 4.'),
+    ],
+    comments: [
+      pin('pc1', 'a1v1', 3, 50, 72, 'u-client', 44, 'Price should be ₹299, not ₹349.'),
+      pin('pc2', 'a1v1', 0, 86, 8, 'u-client', 44, 'Old logo here. Use the new one.'),
+      pin('pc3', 'a1v1', 0, 80, 14, 'u-emp', 40, 'Updated in v2 across all six posts.'),
+    ],
+  },
+  {
+    id: 'a2', organisationId: ORG.TERRA, projectId: 'p2', deliverableId: 'p2d3', title: 'Homepage design', kind: 'IMAGE',
+    status: 'PENDING', revisionsUsed: 2, revisionsAllowed: 3,
+    versions: [
+      ver('a2v1', 1, 'homepage-v1.png', [webPage('Real food, near you', 'TERRA FOODS', 0)], 300, 'Meera Pillai', decided('CHANGES_REQUESTED', 'Arjun Kapoor', 280, 'Hero feels too dark. Show store locator higher up.')),
+      ver('a2v2', 2, 'homepage-v2.png', [webPage('Real food, near you', 'TERRA FOODS', 1)], 200, 'Meera Pillai', decided('CHANGES_REQUESTED', 'Neha Verma', 150, 'Better. Make the menu cards bigger on mobile.')),
+      ver('a2v3', 3, 'homepage-v3.png', [webPage('Real food, near you', 'TERRA FOODS', 2)], 98, 'Meera Pillai'),
+    ],
+    comments: [
+      pin('pc4', 'a2v1', 0, 40, 20, 'u-client', 280, 'Too dark for a food brand.'),
+      pin('pc5', 'a2v2', 0, 30, 52, 'u-rep', 150, 'These cards are small on my phone.'),
+    ],
+  },
+  {
+    id: 'a3', organisationId: ORG.TERRA, projectId: 'p1', deliverableId: 'p1d2', title: 'November calendar (16 posts)', kind: 'PDF',
+    status: 'APPROVED', revisionsUsed: 2, revisionsAllowed: 3,
+    versions: [
+      ver('a3v1', 1, 'nov-calendar-v1.pdf', [docPage('November calendar', 1, 2, 0), docPage('November calendar', 2, 2, 0)], 400, 'Priya Sharma', decided('CHANGES_REQUESTED', 'Arjun Kapoor', 380, 'Add Diwali posts.')),
+      ver('a3v2', 2, 'nov-calendar-v2.pdf', [docPage('November calendar', 1, 2, 1), docPage('November calendar', 2, 2, 1)], 300, 'Priya Sharma', decided('CHANGES_REQUESTED', 'Arjun Kapoor', 260, 'Swap week 3 and 4.')),
+      ver('a3v3', 3, 'nov-calendar-v3.pdf', [docPage('November calendar', 1, 2, 2), docPage('November calendar', 2, 2, 2)], 200, 'Priya Sharma', decided('APPROVED', 'Arjun Kapoor', 150)),
+    ],
+    comments: [pin('pc6', 'a3v1', 1, 60, 40, 'u-client', 380, 'Diwali is missing.')],
+  },
+  {
+    id: 'a4', organisationId: ORG.NOVA, projectId: 'p4', deliverableId: 'p4d4', title: 'Landing page hero banner', kind: 'IMAGE',
+    status: 'PENDING', revisionsUsed: 3, revisionsAllowed: 3,
+    versions: [1, 2, 3, 4].map((n) =>
+      ver(`a4v${n}`, n, `nova-hero-v${n}.png`, [webPage('Healthy skin, simply', 'NOVA CLINICS', n + 1)], 200 - n * 40, 'Priya Sharma',
+        n < 4 ? decided('CHANGES_REQUESTED', 'Sameer Joshi', 190 - n * 40, HERO_NOTES[n - 1]) : undefined),
+    ),
+    comments: [pin('pc7', 'a4v3', 0, 30, 18, 'u-client2', 70, 'Headline font too thin.')],
+  },
+  {
+    id: 'a5', organisationId: ORG.NOVA, projectId: 'p5', deliverableId: 'p5d1', title: 'Logo final files', kind: 'IMAGE',
+    status: 'APPROVED', revisionsUsed: 2, revisionsAllowed: 3,
+    versions: [
+      ver('a5v1', 1, 'nova-logo-v1.png', [post('NOVA', 'Nova Clinics', 1, 0)], 900, 'Meera Pillai', decided('CHANGES_REQUESTED', 'Sameer Joshi', 880, 'Try a softer colour.')),
+      ver('a5v2', 2, 'nova-logo-v2.png', [post('NOVA', 'Nova Clinics', 2, 1)], 700, 'Meera Pillai', decided('CHANGES_REQUESTED', 'Sameer Joshi', 680, 'Closer. Thicker letters.')),
+      ver('a5v3', 3, 'nova-logo-v3.png', [post('NOVA', 'Nova Clinics', 3, 2)], 500, 'Meera Pillai', decided('APPROVED', 'Sameer Joshi', 400)),
+    ],
+    comments: [],
+  },
 ];
 
 export const messages = [

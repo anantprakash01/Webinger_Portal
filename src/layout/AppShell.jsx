@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { LuEllipsis, LuLogOut, LuX } from 'react-icons/lu';
 import { isMock } from '@/api/client';
-import { demoAccounts, DEMO_PASSWORD } from '@/api/mock/data';
+import { demoAccounts, DEMO_MFA_CODE, DEMO_PASSWORD } from '@/api/mock/data';
 import { homePath, useAuth } from '@/auth/AuthContext';
 import { Logo } from '@/components/Logo';
 import { Avatar, Button } from '@/components/ui';
@@ -11,15 +11,16 @@ import { AREA_TITLE, navFor } from './nav';
 import './shell.css';
 
 export function AppShell() {
-  const { user, area, logout, login } = useAuth();
+  const { user, area, logout, login, verifyMfa } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [moreOpen, setMoreOpen] = useState(false);
+  const [switchError, setSwitchError] = useState(null);
 
   useEffect(() => setMoreOpen(false), [location.pathname]);
 
   if (!user || !area) return null;
-  const items = navFor(area, user.role);
+  const items = navFor(area, user);
   const primary = items.filter((i) => i.primary).slice(0, 4);
   const hasMore = items.length > primary.length;
   const end = (to) => to === homePath(area);
@@ -30,8 +31,16 @@ export function AppShell() {
   };
 
   const switchTo = async (email) => {
-    const u = await login(email, DEMO_PASSWORD);
-    navigate(homePath(AREA_BY_ROLE[u.role]), { replace: true });
+    setSwitchError(null);
+    try {
+      // Demo aid only: switches account and fills the two-step code itself.
+      const r = await login(email, DEMO_PASSWORD);
+      const u = r.mfa ? await verifyMfa(r.mfa.mfaToken, DEMO_MFA_CODE) : r.user;
+      navigate(homePath(AREA_BY_ROLE[u.role]), { replace: true });
+    } catch (e) {
+      // e.g. that demo account was suspended or its password was reset during the demo.
+      setSwitchError(e instanceof Error ? e.message : 'Could not switch account.');
+    }
   };
 
   return (
@@ -69,6 +78,11 @@ export function AppShell() {
           <div className="demo-bar" role="note">
             <strong>Prototype</strong>
             <span>Demo data, nothing is saved.</span>
+            {switchError && (
+              <span role="alert" className="demo-bar__error">
+                {switchError}
+              </span>
+            )}
             <span className="spacer" />
             <label htmlFor="role-switch">View as</label>
             <select id="role-switch" value={user.email} onChange={(e) => void switchTo(e.target.value)}>

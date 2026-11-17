@@ -9,15 +9,33 @@
 import { ApiError } from '@/types';
 import type {
   AdminDashboard,
+  AdminUser,
+  AdminUserQuery,
   ApiProblem,
+  ApprovalDecisionInput,
+  ApprovalDetail,
+  ApprovalItem,
+  ApprovalStatus,
   ClientDashboard,
+  ClientTeam,
+  ClientTeamMember,
   EmployeeDashboard,
   InfluencerDashboard,
+  InviteInfo,
+  LoginEvent,
+  LoginResult,
   NewComment,
+  NewPinComment,
+  Organisation,
   PartnerDashboard,
+  PinComment,
+  PortalSettings,
   ProjectDetail,
   ProjectPage,
   ProjectQuery,
+  RepInvite,
+  RepPatch,
+  ReviewInput,
   Session,
   TaskComment,
   TaskDetail,
@@ -25,7 +43,10 @@ import type {
   TaskPatch,
   TaskQuery,
   User,
+  UserInvite,
 } from '@/types';
+import * as accounts from './mock/accounts';
+import * as approvalsMock from './mock/approvals';
 import * as mock from './mock/handlers';
 
 const MODE = (import.meta.env.VITE_API_MODE ?? 'mock') as 'mock' | 'http';
@@ -57,13 +78,56 @@ const remember = (s: Session | null) => {
 };
 export const getSession = () => current;
 
+/* ---------- session events: the auth context listens to these ---------- */
+type SessionEvent = { type: 'signedOut'; reason: string } | { type: 'userChanged'; user: User };
+const listeners = new Set<(e: SessionEvent) => void>();
+export const onSessionEvent = (fn: (e: SessionEvent) => void) => {
+  listeners.add(fn);
+  return () => void listeners.delete(fn);
+};
+const emit = (e: SessionEvent) => listeners.forEach((fn) => fn(e));
+
+let signOutReason: string | null = null;
+/** The login page shows why the user was signed out (e.g. forced logout), once. */
+export const takeSignOutReason = () => {
+  const r = signOutReason;
+  signOutReason = null;
+  return r;
+};
+
+function expire(reason: string) {
+  if (!current) return;
+  remember(null);
+  signOutReason = reason;
+  emit({ type: 'signedOut', reason });
+}
+
 /* ---------- transport ---------- */
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Authenticated mock call. Re-checks the session first, like the real API does on every request. */
 async function fromMock<T>(fn: (user: User) => T): Promise<T> {
   await wait(DELAY);
   if (!current) throw new ApiError({ status: 401, title: 'Unauthorized', detail: 'Please sign in again.' });
-  return structuredClone(fn(current.user));
+  let user: User;
+  try {
+    user = accounts.checkSession(current);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 401) expire(e.message);
+    throw e;
+  }
+  // Role or permissions changed on the server (e.g. billing granted): keep the UI in step.
+  if (JSON.stringify(user) !== JSON.stringify(current.user)) {
+    remember({ ...current, user });
+    emit({ type: 'userChanged', user });
+  }
+  return structuredClone(fn(user));
+}
+
+/** Mock call that needs no session (sign-in, invite and reset links). */
+async function fromMockPublic<T>(fn: () => T): Promise<T> {
+  await wait(DELAY);
+  return structuredClone(fn());
 }
 
 async function http<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -83,9 +147,12 @@ async function http<T>(path: string, init: RequestInit = {}): Promise<T> {
     } catch {
       /* body was not JSON */
     }
-    throw new ApiError(problem);
+    const err = new ApiError(problem);
+    // Phase 1: try POST /auth/refresh once before giving up.
+    if (res.status === 401 && current) expire(err.message);
+    throw err;
   }
-  return res.status === 204 ? (undefined as T) : ((await res.json()) as T);
+  return res.status === 204 || res.status === 202 ? (undefined as T) : ((await res.json()) as T);
 }
 
 /** Builds ?a=1&b=2 from an object, skipping empty values. */
@@ -97,16 +164,26 @@ function qs(params: object): string {
   const s = sp.toString();
   return s ? `?${s}` : '';
 }
-const json = (method: string, body: unknown): RequestInit => ({ method, body: JSON.stringify(body) });
+const json = (method: string, body?: unknown): RequestInit => ({ method, body: body === undefined ? undefined : JSON.stringify(body) });
 const enc = encodeURIComponent;
+
+const isSession = (r: LoginResult): r is Session => 'accessToken' in r;
 
 /* ---------- endpoints (one per path in docs/api/openapi.yaml) ---------- */
 export const api = {
   auth: {
-    async login(email: string, password: string): Promise<Session> {
+    /** Returns a session, or a two-step challenge for admins and managers. */
+    async login(email: string, password: string): Promise<LoginResult> {
+      const r = isMock
+        ? await fromMockPublic(() => accounts.login(email, password))
+        : await http<LoginResult>('/auth/login', json('POST', { email, password }));
+      if (isSession(r)) remember(r);
+      return r;
+    },
+    async verifyMfa(mfaToken: string, code: string): Promise<Session> {
       const s = isMock
-        ? (await wait(DELAY), mock.login(email, password))
-        : await http<Session>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
+        ? await fromMockPublic(() => accounts.verifyMfa(mfaToken, code))
+        : await http<Session>('/auth/mfa/verify', json('POST', { mfaToken, code }));
       remember(s);
       return s;
     },
@@ -114,6 +191,22 @@ export const api = {
       if (!isMock) await http<void>('/auth/logout', { method: 'POST' }).catch(() => undefined);
       remember(null);
     },
+    me: () => (isMock ? fromMock((u) => u) : http<User>('/me')),
+    getInvite: (token: string) =>
+      isMock ? fromMockPublic(() => accounts.getInvite(token)) : http<InviteInfo>(`/auth/invites/${enc(token)}`),
+    async acceptInvite(token: string, password: string): Promise<Session> {
+      const s = isMock
+        ? await fromMockPublic(() => accounts.acceptInvite(token, password))
+        : await http<Session>(`/auth/invites/${enc(token)}/accept`, json('POST', { password }));
+      remember(s);
+      return s;
+    },
+    forgotPassword: (email: string) =>
+      isMock ? fromMockPublic(() => accounts.forgotPassword(email)) : http<void>('/auth/password/forgot', json('POST', { email })),
+    resetPassword: (token: string, password: string) =>
+      isMock
+        ? fromMockPublic(() => accounts.resetPassword(token, password))
+        : http<void>('/auth/password/reset', json('POST', { token, password })),
   },
   dashboard: {
     admin: () => (isMock ? fromMock(mock.adminDashboard) : http<AdminDashboard>('/dashboard/admin')),
@@ -142,5 +235,54 @@ export const api = {
       isMock
         ? fromMock((u) => mock.addComment(u, id, body))
         : http<TaskComment>(`/tasks/${enc(id)}/comments`, json('POST', body)),
+    review: (id: string, body: ReviewInput) =>
+      isMock ? fromMock((u) => mock.reviewTask(u, id, body)) : http<TaskDetail>(`/tasks/${enc(id)}/review`, json('POST', body)),
+  },
+  approvals: {
+    list: (q: { status?: ApprovalStatus; projectId?: string } = {}) =>
+      isMock ? fromMock((u) => approvalsMock.listApprovals(u, q)) : http<ApprovalItem[]>(`/approvals${qs(q)}`),
+    get: (id: string) => (isMock ? fromMock((u) => approvalsMock.getApproval(u, id)) : http<ApprovalDetail>(`/approvals/${enc(id)}`)),
+    decide: (id: string, body: ApprovalDecisionInput) =>
+      isMock
+        ? fromMock((u) => approvalsMock.decideApproval(u, id, body))
+        : http<ApprovalDetail>(`/approvals/${enc(id)}/decision`, json('POST', body)),
+    comment: (id: string, body: NewPinComment) =>
+      isMock
+        ? fromMock((u) => approvalsMock.addPinComment(u, id, body))
+        : http<PinComment>(`/approvals/${enc(id)}/comments`, json('POST', body)),
+  },
+  clientTeam: {
+    get: () => (isMock ? fromMock(accounts.getTeam) : http<ClientTeam>('/client/team')),
+    invite: (body: RepInvite) =>
+      isMock ? fromMock((u) => accounts.inviteRep(u, body)) : http<ClientTeamMember>('/client/team/invites', json('POST', body)),
+    update: (id: string, patch: RepPatch) =>
+      isMock ? fromMock((u) => accounts.updateRep(u, id, patch)) : http<ClientTeamMember>(`/client/team/${enc(id)}`, json('PATCH', patch)),
+  },
+  admin: {
+    users: (q: AdminUserQuery = {}) => (isMock ? fromMock((u) => accounts.listUsers(u, q)) : http<AdminUser[]>(`/admin/users${qs(q)}`)),
+    organisations: () => (isMock ? fromMock(accounts.listOrganisations) : http<Organisation[]>('/admin/organisations')),
+    invite: (body: UserInvite) =>
+      isMock ? fromMock((u) => accounts.inviteUser(u, body)) : http<AdminUser>('/admin/users/invites', json('POST', body)),
+    approve: (id: string) =>
+      isMock ? fromMock((u) => accounts.approveUser(u, id)) : http<AdminUser>(`/admin/users/${enc(id)}/approve`, json('POST')),
+    suspend: (id: string) =>
+      isMock ? fromMock((u) => accounts.suspendUser(u, id)) : http<AdminUser>(`/admin/users/${enc(id)}/suspend`, json('POST')),
+    reactivate: (id: string) =>
+      isMock ? fromMock((u) => accounts.reactivateUser(u, id)) : http<AdminUser>(`/admin/users/${enc(id)}/reactivate`, json('POST')),
+    resetPassword: (id: string) =>
+      isMock ? fromMock((u) => accounts.adminResetPassword(u, id)) : http<void>(`/admin/users/${enc(id)}/reset`, json('POST')),
+    forceLogout: (id: string) =>
+      isMock ? fromMock((u) => accounts.forceLogout(u, id)) : http<void>(`/admin/users/${enc(id)}/logout`, json('POST')),
+    loginHistory: (userId?: string) =>
+      isMock ? fromMock((u) => accounts.loginHistory(u, userId)) : http<LoginEvent[]>(`/admin/login-history${qs({ userId })}`),
+  },
+  settings: {
+    get: () => (isMock ? fromMock(accounts.getSettings) : http<PortalSettings>('/settings')),
+    save: (body: PortalSettings) =>
+      isMock ? fromMock((u) => accounts.saveSettings(u, body)) : http<PortalSettings>('/settings', json('PUT', body)),
+  },
+  /** Prototype only: emails the mock would have sent, so invite and reset links can be opened. */
+  demo: {
+    outbox: (to?: string) => (isMock ? fromMockPublic(() => accounts.demoOutbox(to)) : Promise.resolve([])),
   },
 };

@@ -21,8 +21,9 @@ import type {
   ProjectListItem,
   ProjectPage,
   ProjectQuery,
+  Permission,
   ProjectSummary,
-  Session,
+  ReviewInput,
   TaskComment,
   TaskDetail,
   TaskItem,
@@ -32,21 +33,21 @@ import type {
   TeamMember,
   User,
 } from '@/types';
+import { post } from './art';
 import {
   approvals,
   CLIENT_NAME,
   day,
-  DEMO_PASSWORD,
   invoices,
   messages,
   nameOf,
   ORG,
   projects,
+  settings,
   tasks,
   userById,
-  users,
 } from './data';
-import type { MilestoneRow, ProjectRow, TaskRow } from './data';
+import type { MilestoneRow, ProjectRow, TaskRow, UserRow } from './data';
 
 const strip = <T extends object, K extends keyof T>(row: T, ...keys: K[]): Omit<T, K> => {
   const copy = { ...row };
@@ -56,34 +57,42 @@ const strip = <T extends object, K extends keyof T>(row: T, ...keys: K[]): Omit<
 
 /* ---------------------------------------------------------------- errors */
 
-const forbidden = (detail = 'Your role cannot open this page.') => new ApiError({ status: 403, title: 'Forbidden', detail });
+export const forbidden = (detail = 'Your role cannot open this page.') => new ApiError({ status: 403, title: 'Forbidden', detail });
 // BACKEND: answer 404, not 403, for records in another organisation, so ids cannot be probed.
-const notFound = (what: string) => new ApiError({ status: 404, title: 'Not Found', detail: `${what} not found.` });
-const badRequest = (detail: string) => new ApiError({ status: 400, title: 'Bad Request', detail });
-const conflict = (detail: string) => new ApiError({ status: 409, title: 'Conflict', detail });
+export const notFound = (what: string) => new ApiError({ status: 404, title: 'Not Found', detail: `${what} not found.` });
+export const badRequest = (detail: string) => new ApiError({ status: 400, title: 'Bad Request', detail });
+export const conflict = (detail: string) => new ApiError({ status: 409, title: 'Conflict', detail });
 
 function requireArea(user: User, area: Area) {
   if (AREA_BY_ROLE[user.role] !== area) throw forbidden();
 }
 
-const isAdminArea = (u: User) => u.role === 'SUPER_ADMIN' || u.role === 'MANAGER';
-const isStaff = (u: User) => u.organisationId === ORG.WEBINGER;
-const isClient = (u: User) => u.role === 'CLIENT_OWNER' || u.role === 'CLIENT_REP';
+export const isAdminArea = (u: User) => u.role === 'SUPER_ADMIN' || u.role === 'MANAGER';
+export const isStaff = (u: User) => u.organisationId === ORG.WEBINGER;
+export const isClient = (u: User) => u.role === 'CLIENT_OWNER' || u.role === 'CLIENT_REP';
 
-/* ------------------------------------------------------------------ auth */
+/* ----------------------------------------------------------- permissions */
 
-export function login(email: string, password: string): Session {
-  const user = users.find((u) => u.email.toLowerCase() === email.trim().toLowerCase());
-  if (!user || password !== DEMO_PASSWORD) {
-    // Same message for both cases, so the form does not reveal which emails exist.
-    throw new ApiError({ status: 401, title: 'Unauthorized', detail: 'Email or password is incorrect.' });
-  }
-  return {
-    user,
-    accessToken: `mock.${user.id}.${Date.now()}`,
-    expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
-  };
+/** BACKEND: grants on top of the role. Client owners always have both; reps get billing only if the owner allows it. */
+export function permissionsOf(row: UserRow): Permission[] {
+  if (row.role === 'CLIENT_OWNER') return ['BILLING_VIEW', 'TEAM_MANAGE'];
+  if (row.role === 'CLIENT_REP' && row.canSeeBilling) return ['BILLING_VIEW'];
+  return [];
 }
+
+/** The only shape of a user that leaves the API. Never status internals, never passwords. */
+export const toPublicUser = (row: UserRow): User => ({
+  id: row.id,
+  name: row.name,
+  email: row.email,
+  role: row.role,
+  organisationId: row.organisationId,
+  organisationName: row.organisationName,
+  title: row.title,
+  permissions: permissionsOf(row),
+});
+
+export const hasPermission = (u: User, p: Permission) => !!u.permissions?.includes(p);
 
 /* ------------------------------------------------------- project access */
 
@@ -91,7 +100,7 @@ export function login(email: string, password: string): Session {
  * BACKEND: the single rule for "may this caller see this project". Use it in
  * the repository query (WHERE clause), never by filtering after loading.
  */
-function canSeeProject(user: User, p: ProjectRow): boolean {
+export function canSeeProject(user: User, p: ProjectRow): boolean {
   switch (user.role) {
     case 'SUPER_ADMIN':
       return true;
@@ -109,7 +118,7 @@ function canSeeProject(user: User, p: ProjectRow): boolean {
   }
 }
 
-function findProject(user: User, id: string): ProjectRow {
+export function findProject(user: User, id: string): ProjectRow {
   const p = projects.find((x) => x.id === id);
   if (!p || !canSeeProject(user, p)) throw notFound('Project');
   return p;
@@ -206,11 +215,24 @@ export function clientDashboard(user: User): ClientDashboard {
   const org = user.organisationId;
   const visible = projects.filter((p) => p.status === 'ACTIVE' && canSeeProject(user, p));
   const visibleNames = new Set(visible.map((p) => p.name));
-  const canSeeBilling = user.role === 'CLIENT_OWNER';
+  // BACKEND: billing needs the BILLING_VIEW permission (owners always; reps only if granted).
+  const canSeeBilling = hasPermission(user, 'BILLING_VIEW');
   return {
     accountManager: { name: 'Kavya Iyer', email: 'kavya@webinger.in', phone: '+91 98XXX XX210', hours: 'Mon–Sat, 10:00–19:00' },
     projects: visible.slice(0, 6).map(toSummary),
-    approvals: approvals.filter((a) => a.organisationId === org && visibleNames.has(a.projectName)).map((a) => strip(a, 'organisationId')),
+    approvals: approvals
+      .filter((a) => a.status === 'PENDING' && a.organisationId === org && projects.some((p) => p.id === a.projectId && canSeeProject(user, p)))
+      .map((a) => {
+        const latest = a.versions[a.versions.length - 1];
+        return {
+          id: a.id,
+          title: a.title,
+          projectName: projects.find((p) => p.id === a.projectId)!.name,
+          submittedAt: latest.submittedAt,
+          revisionsUsed: a.revisionsUsed,
+          revisionsAllowed: a.revisionsAllowed,
+        };
+      }),
     unpaidInvoices: canSeeBilling
       ? invoices.filter((i) => i.organisationId === org && i.status !== 'PAID').map((i) => strip(i, 'organisationId'))
       : [],
@@ -329,7 +351,7 @@ export function getProject(user: User, id: string): ProjectDetail {
 
   const team: TeamMember[] = p.memberIds
     .map((mid) => userById(mid))
-    .filter((u): u is User => !!u)
+    .filter((u): u is UserRow => !!u)
     .map((u) => ({
       id: u.id,
       name: u.name,
@@ -370,7 +392,7 @@ export function getProject(user: User, id: string): ProjectDetail {
 
 /* ----------------------------------------------------------------- tasks */
 
-function toTaskItem(t: TaskRow): TaskItem {
+export function toTaskItem(t: TaskRow): TaskItem {
   const p = projects.find((x) => x.id === t.projectId)!;
   return {
     id: t.id,
@@ -386,6 +408,7 @@ function toTaskItem(t: TaskRow): TaskItem {
     checklistDone: t.checklist.filter((c) => c.done).length,
     checklistTotal: t.checklist.length,
     commentCount: t.comments.length,
+    reviewerId: t.reviewerId,
   };
 }
 
@@ -452,7 +475,7 @@ const STATUS_LABEL: Record<TaskStatus, string> = {
   DONE: 'Done',
 };
 
-function log(projectId: string, actor: User, text: string, visibility: 'INTERNAL' | 'CLIENT' = 'INTERNAL') {
+export function log(projectId: string, actor: User, text: string, visibility: 'INTERNAL' | 'CLIENT' = 'INTERNAL') {
   const p = projects.find((x) => x.id === projectId);
   p?.activity.push({ id: `act${Date.now()}${Math.random().toString(36).slice(2, 6)}`, at: new Date().toISOString(), actor: actor.name, text, visibility });
 }
@@ -482,9 +505,10 @@ export function patchTask(user: User, id: string, patch: TaskPatch): TaskDetail 
       throw conflict(`"${t.title}" is client-facing, so it must pass internal review first. Move it to In review and ${t.reviewerId ? nameOf(t.reviewerId) : 'a reviewer'} will pass it on.`);
     }
     const from = t.status;
-    t.status = patch.status;
     log(t.projectId, user, `Moved "${t.title}" from ${STATUS_LABEL[from]} to ${STATUS_LABEL[patch.status]}`);
-    if (patch.status === 'CLIENT_APPROVAL') log(t.projectId, user, `Sent "${t.title}" for your approval`, 'CLIENT');
+    // BACKEND: "With client" always goes through sendToClient, so an approval version exists for the client to act on.
+    if (patch.status === 'CLIENT_APPROVAL' && t.clientFacing) sendToClient(t, user);
+    else t.status = patch.status;
   }
   if (patch.assigneeId !== undefined && patch.assigneeId !== t.assigneeId) {
     t.assigneeId = patch.assigneeId;
@@ -493,6 +517,89 @@ export function patchTask(user: User, id: string, patch: TaskPatch): TaskDetail 
   if (patch.due !== undefined && patch.due !== t.due) {
     t.due = patch.due;
     log(t.projectId, user, `Moved the due date of "${t.title}" to ${patch.due}`);
+  }
+  return toTaskDetail(t);
+}
+
+/**
+ * Puts a task's deliverable in front of the client as a new approval version.
+ * Creates the deliverable and the approval on first use. Phase 1: the version's
+ * files are the task's files marked client-visible; the demo draws placeholder art.
+ */
+export function sendToClient(t: TaskRow, actor: User, note?: string) {
+  const p = projects.find((x) => x.id === t.projectId)!;
+  let d = p.deliverables.find((x) => x.id === t.deliverableId);
+  if (!d) {
+    d = {
+      id: `${p.id}d${Date.now().toString(36)}`,
+      title: t.title,
+      status: 'PLANNED',
+      due: t.due,
+      revisionsUsed: 0,
+      revisionsAllowed: settings.defaultRevisions,
+    };
+    p.deliverables.push(d);
+    t.deliverableId = d.id;
+  }
+  let a = approvals.find((x) => x.deliverableId === d.id);
+  if (a?.status === 'PENDING') throw conflict(`"${d.title}" is already waiting for the client.`);
+  if (!a) {
+    a = {
+      id: `a${Date.now().toString(36)}`,
+      organisationId: p.organisationId,
+      projectId: p.id,
+      deliverableId: d.id,
+      title: d.title,
+      kind: 'IMAGE',
+      status: 'PENDING',
+      revisionsUsed: d.revisionsUsed,
+      revisionsAllowed: d.revisionsAllowed,
+      versions: [],
+      comments: [],
+    };
+    approvals.push(a);
+  }
+  const n = a.versions.length + 1;
+  const headline = d.title.split(' ').slice(0, 3).join(' ');
+  a.versions.push({
+    id: `${a.id}v${n}`,
+    number: n,
+    fileName: `${d.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-v${n}.png`,
+    pages: [post(headline, (CLIENT_NAME[p.organisationId] ?? '').split(' ')[0].toUpperCase(), 1, n - 1)],
+    submittedAt: new Date().toISOString(),
+    submittedBy: nameOf(t.assigneeId),
+    note,
+  });
+  a.status = 'PENDING';
+  d.status = 'CLIENT_APPROVAL';
+  t.status = 'CLIENT_APPROVAL';
+  log(p.id, actor, `Sent "${d.title}" (version ${n}) for your approval`, 'CLIENT');
+}
+
+/** POST /tasks/{id}/review */
+export function reviewTask(user: User, id: string, input: ReviewInput): TaskDetail {
+  const t = findTask(user, id);
+  // BACKEND: only the named reviewer or the admin area can pass or fail a review.
+  if (!isAdminArea(user) && t.reviewerId !== user.id) throw forbidden('Only the reviewer or a manager can review this task.');
+  if (t.status !== 'IN_REVIEW') throw conflict(`"${t.title}" is not waiting for review any more.`);
+  const note = input.note?.trim() ?? '';
+  if (input.result !== 'PASS' && input.result !== 'FAIL') throw badRequest('Result must be PASS or FAIL.');
+  if (input.result === 'FAIL' && note.length < 5) throw badRequest('Tell the assignee what to fix (at least a few words).');
+  if (note.length > 2000) throw badRequest('Review notes can be at most 2,000 characters.');
+
+  const comment = (text: string) =>
+    t.comments.push({ id: `cm${Date.now()}`, authorId: user.id, author: user.name, at: new Date().toISOString(), text, visibility: 'INTERNAL' });
+
+  if (input.result === 'PASS') {
+    if (note) comment(`Review passed: ${note}`);
+    log(t.projectId, user, `Passed internal review on "${t.title}"`);
+    if (t.clientFacing) sendToClient(t, user);
+    else t.status = 'DONE';
+  } else {
+    comment(`Sent back: ${note}`);
+    t.status = 'IN_PROGRESS';
+    t.reviewFailures += 1;
+    log(t.projectId, user, `Sent "${t.title}" back to ${nameOf(t.assigneeId)} after review`);
   }
   return toTaskDetail(t);
 }

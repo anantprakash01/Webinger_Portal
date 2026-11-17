@@ -2,7 +2,7 @@ import { useLocation } from 'react-router-dom';
 import { LuClock } from 'react-icons/lu';
 import { useAuth } from '@/auth/AuthContext';
 import { Card, PageHeader } from '@/components/ui';
-import { NAV } from '@/layout/nav';
+import { NAV, canSee } from '@/layout/nav';
 
 /** Stands in for screens that later weeks will build, so navigation works end to end. */
 export function Placeholder() {
@@ -10,7 +10,7 @@ export function Placeholder() {
   const { pathname } = useLocation();
   const item = area ? NAV[area].find((i) => i.to === pathname) : undefined;
   // Pages limited to some roles (e.g. Finance for Super Admin) are hidden from the rest.
-  if (item?.roles && user && !item.roles.includes(user.role)) return <NotFound />;
+  if (item && user && !canSee(user, item)) return <NotFound />;
   return (
     <div className="page">
       <PageHeader eyebrow="Coming soon" title={item?.label ?? 'Page'} />

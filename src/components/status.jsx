@@ -67,3 +67,15 @@ export const VisibilityBadge = ({ visibility }) =>
 
 export const HEALTH_OPTIONS = Object.entries(HEALTH).map(([value, [, label]]) => ({ value, label }));
 export const PROJECT_STATUS_OPTIONS = Object.entries(PROJECT).map(([value, [, label]]) => ({ value, label }));
+
+const ACCOUNT = {
+  ACTIVE: ['ok', 'Active', 'Active'],
+  INVITED: ['info', 'Invited', 'Invite sent'],
+  PENDING_APPROVAL: ['warn', 'Needs approval', 'Waiting for Webinger'],
+  SUSPENDED: ['neutral', 'Suspended', 'Access removed'],
+};
+/** `clientView` uses the client's wording, e.g. "Waiting for Webinger" instead of "Needs approval". */
+export const AccountStatusBadge = ({ status, clientView }) => (
+  <Badge tone={ACCOUNT[status][0]}>{ACCOUNT[status][clientView ? 2 : 1]}</Badge>
+);
+export const ACCOUNT_STATUS_OPTIONS = Object.entries(ACCOUNT).map(([value, [, label]]) => ({ value, label }));

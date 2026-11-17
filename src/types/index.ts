@@ -37,7 +37,11 @@ export interface User {
   organisationId: string;
   organisationName: string;
   title?: string;
+  /** Extra grants on top of the role, e.g. a client rep allowed to see billing. */
+  permissions?: Permission[];
 }
+
+export type Permission = 'BILLING_VIEW' | 'TEAM_MANAGE';
 
 export interface Session {
   user: User;
@@ -75,6 +79,7 @@ export interface TaskItem {
   checklistDone?: number;
   checklistTotal?: number;
   commentCount?: number;
+  reviewerId?: string;
 }
 
 export interface Approval {
@@ -318,6 +323,198 @@ export interface TaskPatch {
 export interface NewComment {
   text: string;
   visibility: Visibility;
+}
+
+/* ---------- Week 3: approvals ---------- */
+
+export type ApprovalStatus = 'PENDING' | 'APPROVED' | 'CHANGES_REQUESTED';
+export type AssetKind = 'IMAGE' | 'PDF';
+
+export interface ApprovalItem {
+  id: string;
+  title: string;
+  projectId: string;
+  projectName: string;
+  kind: AssetKind;
+  status: ApprovalStatus;
+  versionNumber: number;
+  submittedAt: string;
+  thumbnailUrl: string;
+  revisionsUsed: number;
+  revisionsAllowed: number;
+  commentCount: number;
+}
+
+export interface ApprovalDecision {
+  status: Exclude<ApprovalStatus, 'PENDING'>;
+  byName: string;
+  at: string;
+  note?: string;
+}
+
+export interface AssetVersion {
+  id: string;
+  number: number;
+  fileName: string;
+  /** Preview images, one per page. PDFs are rendered to images by the server. */
+  pages: string[];
+  submittedAt: string;
+  submittedBy: string;
+  note?: string;
+  decision?: ApprovalDecision;
+}
+
+/** A comment pinned to a spot on one page of one version. x and y are percentages. */
+export interface PinComment {
+  id: string;
+  versionId: string;
+  page: number;
+  x: number;
+  y: number;
+  authorId: string;
+  author: string;
+  /** True for Webinger staff, so the client can tell replies apart. */
+  fromAgency: boolean;
+  at: string;
+  text: string;
+}
+
+export interface ApprovalDetail extends ApprovalItem {
+  deliverableId: string;
+  clientName: string;
+  versions: AssetVersion[];
+  comments: PinComment[];
+}
+
+export interface ApprovalDecisionInput {
+  versionId: string;
+  decision: 'APPROVE' | 'REQUEST_CHANGES';
+  note?: string;
+}
+
+export interface NewPinComment {
+  versionId: string;
+  page: number;
+  x: number;
+  y: number;
+  text: string;
+}
+
+/* ---------- Week 3: internal review ---------- */
+
+export interface ReviewInput {
+  result: 'PASS' | 'FAIL';
+  note?: string;
+}
+
+/* ---------- Week 3: users, team, settings ---------- */
+
+export type AccountStatus = 'ACTIVE' | 'INVITED' | 'PENDING_APPROVAL' | 'SUSPENDED';
+
+export interface ClientTeamMember {
+  id: string;
+  name: string;
+  email: string;
+  role: Role;
+  title?: string;
+  status: AccountStatus;
+  projectIds: string[];
+  canSeeBilling: boolean;
+  invitedAt?: string;
+  lastLoginAt?: string;
+}
+
+export interface ClientTeam {
+  members: ClientTeamMember[];
+  projects: Array<{ id: string; name: string }>;
+}
+
+export interface RepInvite {
+  name: string;
+  email: string;
+  title?: string;
+  projectIds: string[];
+  canSeeBilling: boolean;
+}
+
+export interface RepPatch {
+  projectIds?: string[];
+  canSeeBilling?: boolean;
+  suspended?: boolean;
+}
+
+export interface AdminUser {
+  id: string;
+  name: string;
+  email: string;
+  role: Role;
+  organisationId: string;
+  organisationName: string;
+  title?: string;
+  status: AccountStatus;
+  mfaEnabled: boolean;
+  createdAt: string;
+  lastLoginAt?: string;
+  /** Who asked for the account, e.g. the client owner who invited a rep. */
+  invitedBy?: string;
+}
+
+export interface AdminUserQuery {
+  q?: string;
+  role?: Role;
+  status?: AccountStatus;
+}
+
+export interface UserInvite {
+  name: string;
+  email: string;
+  role: Role;
+  organisationId: string;
+  title?: string;
+}
+
+export interface Organisation {
+  id: string;
+  name: string;
+  kind: 'AGENCY' | 'CLIENT' | 'INFLUENCER' | 'PARTNER';
+}
+
+export interface LoginEvent {
+  id: string;
+  userId?: string;
+  userName: string;
+  email: string;
+  at: string;
+  result: 'SUCCESS' | 'FAILED' | 'MFA_FAILED' | 'LOCKED';
+  ip: string;
+  device: string;
+}
+
+export interface PortalSettings {
+  businessHours: { days: number[]; open: string; close: string; timezone: string };
+  responseTimes: { firstReplyHours: number; ticketResolutionHours: number };
+  approvalLimits: { managerDiscountPercent: number; managerSpendLimit: number; deputyPayoutLimit: number };
+  defaultRevisions: number;
+  reminderAfterDays: number;
+}
+
+/* ---------- Week 3: auth flows ---------- */
+
+export interface MfaChallenge {
+  mfaRequired: true;
+  mfaToken: string;
+  /** Masked destination, e.g. "Authenticator app". */
+  method: string;
+}
+
+export type LoginResult = Session | MfaChallenge;
+
+export interface InviteInfo {
+  name: string;
+  email: string;
+  role: Role;
+  organisationName: string;
+  expiresAt: string;
 }
 
 /* ---------- API errors ---------- */

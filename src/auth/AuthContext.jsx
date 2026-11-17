@@ -1,5 +1,5 @@
-import { createContext, useCallback, useContext, useMemo, useState } from 'react';
-import { api, getSession } from '@/api/client';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { api, getSession, onSessionEvent } from '@/api/client';
 import { queryClient } from '@/api/queries';
 import { AREA_BY_ROLE } from '@/types';
 
@@ -8,13 +8,40 @@ const AuthContext = createContext(null);
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => getSession()?.user ?? null);
 
-  const login = useCallback(async (email, password) => {
-    const s = await api.auth.login(email, password);
+  // The API layer tells us when the server ended the session (forced logout,
+  // suspension, password reset elsewhere) or when the user's grants changed.
+  useEffect(
+    () =>
+      onSessionEvent((e) => {
+        if (e.type === 'signedOut') {
+          queryClient.clear();
+          setUser(null);
+        } else {
+          setUser(e.user);
+        }
+      }),
+    [],
+  );
+
+  const start = useCallback((session) => {
     // Cached data belongs to the previous user (e.g. after "View as"); never show it to the next one.
     queryClient.clear();
-    setUser(s.user);
-    return s.user;
+    setUser(session.user);
+    return session.user;
   }, []);
+
+  /** Resolves to { user } when signed in, or { mfa } when a two-step code is needed. */
+  const login = useCallback(
+    async (email, password) => {
+      const r = await api.auth.login(email, password);
+      if ('mfaRequired' in r) return { mfa: r };
+      return { user: start(r) };
+    },
+    [start],
+  );
+
+  const verifyMfa = useCallback(async (token, code) => start(await api.auth.verifyMfa(token, code)), [start]);
+  const acceptInvite = useCallback(async (token, password) => start(await api.auth.acceptInvite(token, password)), [start]);
 
   const logout = useCallback(async () => {
     await api.auth.logout();
@@ -23,8 +50,8 @@ export function AuthProvider({ children }) {
   }, []);
 
   const value = useMemo(
-    () => ({ user, area: user ? AREA_BY_ROLE[user.role] : null, login, logout }),
-    [user, login, logout],
+    () => ({ user, area: user ? AREA_BY_ROLE[user.role] : null, login, verifyMfa, acceptInvite, logout }),
+    [user, login, verifyMfa, acceptInvite, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -38,3 +65,7 @@ export function useAuth() {
 
 /** Where each area's home page lives. */
 export const homePath = (area) => `/${area}`;
+
+/** Role checks plus extra grants (e.g. a client rep allowed to see billing). */
+export const can = (user, item) =>
+  !!user && (!item.roles || item.roles.includes(user.role)) && (!item.permission || !!user.permissions?.includes(item.permission));
