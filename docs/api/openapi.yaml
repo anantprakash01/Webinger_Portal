@@ -1,0 +1,700 @@
+openapi: 3.1.0
+info:
+  title: Webinger Portal API
+  version: 0.2.0
+  description: |
+    Contract between the React frontend and the Spring Boot backend.
+    Week 1 covers sign-in and one dashboard per portal area.
+    Week 2 adds projects and tasks.
+    Every endpoint below is served by src/api/mock in Phase 0 and by Spring Boot from Phase 1.
+
+    Access rules the backend must enforce on every call:
+      - the caller's role decides which endpoints it may call (403 otherwise)
+      - every query is filtered by the caller's organisationId
+      - CLIENT_REP sees only projects they are a member of, and no invoices unless granted
+      - a record the caller may not see answers 404 (not 403), so ids cannot be probed
+      - tasks are internal: client, influencer and partner roles get 403 on /tasks
+      - items with visibility INTERNAL (activity, comments, files) are never sent to client roles
+servers:
+  - url: /api/v1
+security:
+  - bearerAuth: []
+
+paths:
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Sign in with email and password
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 8 }
+      responses:
+        '200':
+          description: Signed in. A refresh token is also set as an httpOnly cookie.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+  /auth/refresh:
+    post:
+      tags: [auth]
+      summary: Exchange the refresh cookie for a new access token
+      security: []
+      responses:
+        '200':
+          description: New session
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+        '401': { $ref: '#/components/responses/Problem' }
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Revoke the refresh token and clear the cookie
+      responses:
+        '204': { description: Signed out }
+  /me:
+    get:
+      tags: [auth]
+      summary: The signed-in user
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Problem' }
+
+  /dashboard/admin:
+    get:
+      tags: [dashboard]
+      summary: Agency overview. Roles SUPER_ADMIN, MANAGER
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminDashboard' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /dashboard/client:
+    get:
+      tags: [dashboard]
+      summary: Client home. Roles CLIENT_OWNER, CLIENT_REP
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientDashboard' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /dashboard/employee:
+    get:
+      tags: [dashboard]
+      summary: Employee "My day". Role EMPLOYEE
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EmployeeDashboard' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /dashboard/influencer:
+    get:
+      tags: [dashboard]
+      summary: Influencer home. Role INFLUENCER
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InfluencerDashboard' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /dashboard/partner:
+    get:
+      tags: [dashboard]
+      summary: Partner home. Role PARTNER
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PartnerDashboard' }
+        '403': { $ref: '#/components/responses/Problem' }
+
+  /projects:
+    get:
+      tags: [projects]
+      summary: Projects the caller may see. Staff and client roles.
+      description: |
+        SUPER_ADMIN all; MANAGER projects of their teams; EMPLOYEE projects they are a member of
+        or have tasks on; CLIENT_OWNER own organisation; CLIENT_REP projects they are added to.
+        openTasks / overdueTasks are omitted for client roles. Default order: ACTIVE first,
+        then RED, AMBER, GREEN, then name.
+      parameters:
+        - { name: q, in: query, schema: { type: string }, description: Matches project, client, service or owner name }
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/ProjectStatus' } }
+        - { name: health, in: query, schema: { $ref: '#/components/schemas/Health' } }
+        - { name: clientId, in: query, schema: { type: string } }
+        - { name: service, in: query, schema: { type: string } }
+        - { name: ownerId, in: query, schema: { type: string } }
+        - { name: page, in: query, schema: { type: integer, minimum: 0, default: 0 }, description: Zero-based }
+        - { name: size, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200':
+          description: One page of projects plus filter choices
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectPage' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /projects/{id}:
+    get:
+      tags: [projects]
+      summary: Project with milestones, deliverables, team and activity
+      description: |
+        Client roles receive only CLIENT-visible activity and no tasks, budgetHours or hoursUsed.
+        tasks is present for staff; budgetHours / hoursUsed for the admin area only.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProjectDetail' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /tasks:
+    get:
+      tags: [tasks]
+      summary: Internal tasks. Staff only.
+      description: |
+        Admin area sees all tasks. With no filter an EMPLOYEE gets tasks assigned to them plus tasks they review.
+        Sorted by due date.
+      parameters:
+        - { name: mine, in: query, schema: { type: boolean }, description: Only tasks assigned to the caller }
+        - { name: projectId, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/TaskStatus' } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/TaskItem' } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /tasks/{id}:
+    get:
+      tags: [tasks]
+      summary: Task with brief, checklist, files and comments
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskDetail' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+    patch:
+      tags: [tasks]
+      summary: Change status, assignee or due date
+      description: |
+        status: assignee, reviewer or admin area. A clientFacing task can only be moved to
+        CLIENT_APPROVAL or DONE by its reviewer or the admin area (internal review rule), otherwise 409.
+        assigneeId and due: admin area only (403). assigneeId must be an agency staff member (400).
+        Every change is written to the project activity as INTERNAL; moving to CLIENT_APPROVAL also
+        adds a CLIENT-visible "sent for your approval" entry.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TaskPatch' }
+      responses:
+        '200':
+          description: Updated task
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskDetail' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /tasks/{id}/checklist/{itemId}:
+    patch:
+      tags: [tasks]
+      summary: Tick or untick a checklist item. Assignee, reviewer or admin area.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: itemId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [done]
+              properties:
+                done: { type: boolean }
+      responses:
+        '200':
+          description: Updated task
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskDetail' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /tasks/{id}/comments:
+    post:
+      tags: [tasks]
+      summary: Add a comment. Staff only. The UI defaults visibility to INTERNAL.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NewComment' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskComment' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+
+  responses:
+    Problem:
+      description: Error in RFC 9457 format (Spring ProblemDetail)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+
+  schemas:
+    Problem:
+      type: object
+      required: [status, title]
+      properties:
+        status: { type: integer }
+        title: { type: string }
+        detail: { type: string }
+
+    Role:
+      type: string
+      enum: [SUPER_ADMIN, MANAGER, EMPLOYEE, CLIENT_OWNER, CLIENT_REP, INFLUENCER, PARTNER]
+    Health: { type: string, enum: [GREEN, AMBER, RED] }
+    TaskStatus: { type: string, enum: [TODO, IN_PROGRESS, IN_REVIEW, CLIENT_APPROVAL, DONE] }
+    InvoiceStatus: { type: string, enum: [DRAFT, SENT, PAID, OVERDUE, CANCELLED] }
+    ProjectStatus: { type: string, enum: [ACTIVE, ON_HOLD, COMPLETED] }
+    Priority: { type: string, enum: [LOW, MEDIUM, HIGH] }
+    Visibility:
+      type: string
+      enum: [INTERNAL, CLIENT]
+      description: INTERNAL items are never returned to client roles. Default INTERNAL.
+    MilestoneStatus: { type: string, enum: [DONE, UPCOMING, MISSED] }
+    DeliverableStatus: { type: string, enum: [PLANNED, IN_PROGRESS, IN_REVIEW, CLIENT_APPROVAL, APPROVED] }
+
+    User:
+      type: object
+      required: [id, name, email, role, organisationId, organisationName]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        email: { type: string, format: email }
+        role: { $ref: '#/components/schemas/Role' }
+        organisationId: { type: string }
+        organisationName: { type: string }
+        title: { type: string }
+    Session:
+      type: object
+      required: [user, accessToken, expiresAt]
+      properties:
+        user: { $ref: '#/components/schemas/User' }
+        accessToken: { type: string }
+        expiresAt: { type: string, format: date-time }
+
+    Milestone:
+      type: object
+      required: [title, due]
+      properties:
+        title: { type: string }
+        due: { type: string, format: date }
+    ProjectSummary:
+      type: object
+      required: [id, name, clientName, service, progress, health, owner]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        clientName: { type: string }
+        service: { type: string }
+        progress: { type: integer, minimum: 0, maximum: 100 }
+        health: { $ref: '#/components/schemas/Health' }
+        nextMilestone: { $ref: '#/components/schemas/Milestone' }
+        owner: { type: string }
+    TaskItem:
+      type: object
+      required: [id, title, projectId, projectName, clientName, status, priority, due, assigneeId, assigneeName]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        projectId: { type: string }
+        projectName: { type: string }
+        clientName: { type: string }
+        status: { $ref: '#/components/schemas/TaskStatus' }
+        priority: { $ref: '#/components/schemas/Priority' }
+        due: { type: string, format: date }
+        assigneeId: { type: string }
+        assigneeName: { type: string }
+        checklistDone: { type: integer }
+        checklistTotal: { type: integer }
+        commentCount: { type: integer }
+    Approval:
+      type: object
+      required: [id, title, projectName, submittedAt, revisionsUsed, revisionsAllowed]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        projectName: { type: string }
+        submittedAt: { type: string, format: date-time }
+        revisionsUsed: { type: integer }
+        revisionsAllowed: { type: integer }
+    InvoiceSummary:
+      type: object
+      required: [id, number, clientName, amount, due, status]
+      properties:
+        id: { type: string }
+        number: { type: string }
+        clientName: { type: string }
+        amount: { type: number, description: Amount in INR including GST }
+        due: { type: string, format: date }
+        status: { $ref: '#/components/schemas/InvoiceStatus' }
+    MessagePreview:
+      type: object
+      required: [id, from, projectName, text, at, unread]
+      properties:
+        id: { type: string }
+        from: { type: string }
+        projectName: { type: string }
+        text: { type: string }
+        at: { type: string, format: date-time }
+        unread: { type: boolean }
+    KpiPoint:
+      type: object
+      required: [label, value]
+      properties:
+        label: { type: string }
+        value: { type: string }
+        change: { type: string }
+        good: { type: boolean }
+
+    AdminDashboard:
+      type: object
+      required: [revenueThisMonth, recurringRevenue, outstanding, overdueTasks, activeClients, satisfaction, healthMix, projectsAtRisk, overdueInvoices, teamLoad, pipeline, waitingOnYou]
+      properties:
+        revenueThisMonth: { type: number }
+        recurringRevenue: { type: number }
+        outstanding: { type: number }
+        overdueTasks: { type: integer }
+        activeClients: { type: integer }
+        satisfaction: { type: number }
+        healthMix:
+          type: object
+          properties:
+            GREEN: { type: integer }
+            AMBER: { type: integer }
+            RED: { type: integer }
+        projectsAtRisk: { type: array, items: { $ref: '#/components/schemas/ProjectSummary' } }
+        overdueInvoices: { type: array, items: { $ref: '#/components/schemas/InvoiceSummary' } }
+        teamLoad:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              department: { type: string }
+              assignedHours: { type: number }
+              capacityHours: { type: number }
+        pipeline:
+          type: array
+          items:
+            type: object
+            properties:
+              stage: { type: string }
+              count: { type: integer }
+              value: { type: number }
+        waitingOnYou:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              text: { type: string }
+              kind: { type: string, enum: [PAYOUT, DISCOUNT, PAUSE, LEAVE] }
+
+    ClientDashboard:
+      type: object
+      required: [accountManager, projects, approvals, unpaidInvoices, results, resultsPeriod, messages]
+      properties:
+        accountManager:
+          type: object
+          properties:
+            name: { type: string }
+            email: { type: string }
+            phone: { type: string }
+            hours: { type: string }
+        projects: { type: array, items: { $ref: '#/components/schemas/ProjectSummary' } }
+        approvals: { type: array, items: { $ref: '#/components/schemas/Approval' } }
+        unpaidInvoices: { type: array, items: { $ref: '#/components/schemas/InvoiceSummary' } }
+        results: { type: array, items: { $ref: '#/components/schemas/KpiPoint' } }
+        resultsPeriod: { type: string }
+        messages: { type: array, items: { $ref: '#/components/schemas/MessagePreview' } }
+        offer:
+          type: object
+          properties:
+            id: { type: string }
+            title: { type: string }
+            text: { type: string }
+            cta: { type: string }
+
+    EmployeeDashboard:
+      type: object
+      required: [today, thisWeek, reviewQueue, messages, scorecard, announcements]
+      properties:
+        today: { type: array, items: { $ref: '#/components/schemas/TaskItem' } }
+        thisWeek: { type: array, items: { $ref: '#/components/schemas/TaskItem' } }
+        reviewQueue: { type: array, items: { $ref: '#/components/schemas/TaskItem' } }
+        messages: { type: array, items: { $ref: '#/components/schemas/MessagePreview' } }
+        scorecard:
+          type: object
+          properties:
+            onTimeRate: { type: number }
+            firstPassQuality: { type: number }
+            clientRating: { type: number }
+            hoursLogged: { type: number }
+            hoursCapacity: { type: number }
+        announcements:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              title: { type: string }
+              at: { type: string, format: date }
+
+    InfluencerDashboard:
+      type: object
+      required: [verification, profileCompleteness, invites, active, payouts]
+      properties:
+        verification: { type: string, enum: [PENDING, VERIFIED, REJECTED] }
+        profileCompleteness: { type: integer }
+        invites:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              brand: { type: string }
+              campaign: { type: string }
+              deliverable: { type: string }
+              fee: { type: number }
+              respondBy: { type: string, format: date }
+        active:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              brand: { type: string }
+              campaign: { type: string }
+              step: { type: string }
+              due: { type: string, format: date }
+        payouts:
+          type: object
+          properties:
+            pending: { type: number }
+            paidThisYear: { type: number }
+
+    PartnerDashboard:
+      type: object
+      required: [briefs, invoices]
+      properties:
+        briefs:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              title: { type: string }
+              projectName: { type: string }
+              due: { type: string, format: date }
+              status: { type: string, enum: [NEW, IN_PROGRESS, SUBMITTED, APPROVED] }
+        invoices:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              number: { type: string }
+              amount: { type: number }
+              status: { $ref: '#/components/schemas/InvoiceStatus' }
+
+    # ---------- Week 2: projects and tasks ----------
+    ProjectListItem:
+      allOf:
+        - $ref: '#/components/schemas/ProjectSummary'
+        - type: object
+          required: [status, clientId, ownerId, startDate]
+          properties:
+            status: { $ref: '#/components/schemas/ProjectStatus' }
+            clientId: { type: string, description: The client organisation id }
+            ownerId: { type: string }
+            startDate: { type: string, format: date }
+            endDate: { type: string, format: date }
+            openTasks: { type: integer, description: Staff only }
+            overdueTasks: { type: integer, description: Staff only }
+    ProjectPage:
+      type: object
+      required: [items, page, size, totalItems, totalPages, facets]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/ProjectListItem' } }
+        page: { type: integer, description: Zero-based }
+        size: { type: integer }
+        totalItems: { type: integer }
+        totalPages: { type: integer }
+        facets:
+          type: object
+          description: Filter choices drawn from every project the caller may see, not just this page
+          required: [services, owners, clients]
+          properties:
+            services: { type: array, items: { type: string } }
+            owners: { type: array, items: { $ref: '#/components/schemas/IdName' } }
+            clients: { type: array, items: { $ref: '#/components/schemas/IdName' } }
+    IdName:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string }
+        name: { type: string }
+    MilestoneItem:
+      type: object
+      required: [id, title, due, status]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        due: { type: string, format: date }
+        status: { $ref: '#/components/schemas/MilestoneStatus' }
+        completedAt: { type: string, format: date }
+    Deliverable:
+      type: object
+      required: [id, title, status, due, revisionsUsed, revisionsAllowed]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        milestoneId: { type: string }
+        status: { $ref: '#/components/schemas/DeliverableStatus' }
+        due: { type: string, format: date }
+        revisionsUsed: { type: integer }
+        revisionsAllowed: { type: integer }
+    TeamMember:
+      type: object
+      required: [id, name, title, projectRole]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        title: { type: string }
+        projectRole: { type: string, enum: [OWNER, BACKUP, MEMBER, CLIENT] }
+    ActivityItem:
+      type: object
+      required: [id, at, actor, text, visibility]
+      properties:
+        id: { type: string }
+        at: { type: string, format: date-time }
+        actor: { type: string }
+        text: { type: string }
+        visibility: { $ref: '#/components/schemas/Visibility' }
+    ProjectDetail:
+      allOf:
+        - $ref: '#/components/schemas/ProjectListItem'
+        - type: object
+          required: [scope, milestones, deliverables, team, activity]
+          properties:
+            scope: { type: string }
+            milestones: { type: array, items: { $ref: '#/components/schemas/MilestoneItem' } }
+            deliverables: { type: array, items: { $ref: '#/components/schemas/Deliverable' } }
+            team: { type: array, items: { $ref: '#/components/schemas/TeamMember' } }
+            activity: { type: array, items: { $ref: '#/components/schemas/ActivityItem' }, description: Newest first }
+            tasks: { type: array, items: { $ref: '#/components/schemas/TaskItem' }, description: Staff only }
+            budgetHours: { type: number, description: Admin area only }
+            hoursUsed: { type: number, description: Admin area only }
+    ChecklistItem:
+      type: object
+      required: [id, text, done]
+      properties:
+        id: { type: string }
+        text: { type: string }
+        done: { type: boolean }
+    TaskFile:
+      type: object
+      required: [id, name, sizeKb, uploadedBy, uploadedAt, visibility]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        sizeKb: { type: integer }
+        uploadedBy: { type: string }
+        uploadedAt: { type: string, format: date-time }
+        visibility: { $ref: '#/components/schemas/Visibility' }
+    TaskComment:
+      type: object
+      required: [id, authorId, author, at, text, visibility]
+      properties:
+        id: { type: string }
+        authorId: { type: string }
+        author: { type: string }
+        at: { type: string, format: date-time }
+        text: { type: string }
+        visibility: { $ref: '#/components/schemas/Visibility' }
+    TaskDetail:
+      allOf:
+        - $ref: '#/components/schemas/TaskItem'
+        - type: object
+          required: [description, clientFacing, checklist, files, comments, createdAt]
+          properties:
+            description: { type: string }
+            reviewerId: { type: string }
+            reviewerName: { type: string }
+            clientFacing: { type: boolean, description: Must pass internal review before reaching the client }
+            checklist: { type: array, items: { $ref: '#/components/schemas/ChecklistItem' } }
+            files: { type: array, items: { $ref: '#/components/schemas/TaskFile' } }
+            comments: { type: array, items: { $ref: '#/components/schemas/TaskComment' }, description: Oldest first }
+            createdAt: { type: string, format: date-time }
+    TaskPatch:
+      type: object
+      minProperties: 1
+      properties:
+        status: { $ref: '#/components/schemas/TaskStatus' }
+        assigneeId: { type: string }
+        due: { type: string, format: date }
+    NewComment:
+      type: object
+      required: [text, visibility]
+      properties:
+        text: { type: string, minLength: 1, maxLength: 2000 }
+        visibility: { $ref: '#/components/schemas/Visibility' }
