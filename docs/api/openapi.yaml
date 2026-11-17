@@ -1,11 +1,12 @@
 openapi: 3.1.0
 info:
   title: Webinger Portal API
-  version: 0.2.0
+  version: 0.3.0
   description: |
     Contract between the React frontend and the Spring Boot backend.
     Week 1 covers sign-in and one dashboard per portal area.
     Week 2 adds projects and tasks.
+    Week 3 adds approvals, internal review, the client team, user admin, settings and the auth flows.
     Every endpoint below is served by src/api/mock in Phase 0 and by Spring Boot from Phase 1.
 
     Access rules the backend must enforce on every call:
@@ -15,6 +16,9 @@ info:
       - a record the caller may not see answers 404 (not 403), so ids cannot be probed
       - tasks are internal: client, influencer and partner roles get 403 on /tasks
       - items with visibility INTERNAL (activity, comments, files) are never sent to client roles
+      - every authenticated request re-checks the account: suspended accounts and sessions issued
+        before sessionsRevokedAt (force logout, password reset) get 401
+      - users, roles and settings changes are SUPER_ADMIN only; two Super Admins at all times
 servers:
   - url: /api/v1
 security:
@@ -36,13 +40,21 @@ paths:
               properties:
                 email: { type: string, format: email }
                 password: { type: string, minLength: 8 }
+      description: |
+        Wrong email and wrong password give the same 401. Five failures in 15 minutes give 429.
+        A suspended account with the right password gets 403. SUPER_ADMIN and MANAGER get an
+        MfaChallenge instead of a session and must call /auth/mfa/verify.
       responses:
         '200':
-          description: Signed in. A refresh token is also set as an httpOnly cookie.
+          description: Signed in (Session, refresh token also set as an httpOnly cookie) or a two-step challenge.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Session' }
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Session'
+                  - $ref: '#/components/schemas/MfaChallenge'
         '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
         '429': { $ref: '#/components/responses/Problem' }
   /auth/refresh:
     post:
@@ -277,6 +289,418 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
 
+  /auth/mfa/verify:
+    post:
+      tags: [auth]
+      summary: Finish a two-step sign-in
+      security: []
+      description: |
+        mfaToken is single use and expires after 5 minutes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [mfaToken, code], properties: { mfaToken: { type: string }, code: { type: string, pattern: '^\\d{6}$' } } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+        '401': { $ref: '#/components/responses/Problem' }
+  /auth/invites/{token}:
+    get:
+      tags: [auth]
+      summary: Read an invite before accepting it
+      security: []
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InviteInfo' }
+        '410': { $ref: '#/components/responses/Problem' }
+  /auth/invites/{token}/accept:
+    post:
+      tags: [auth]
+      summary: Set a password and activate the account
+      security: []
+      description: |
+        Password needs at least 8 characters with a letter and a number. Invite links last 7 days and work once.
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [password], properties: { password: { type: string, minLength: 8, maxLength: 128 } } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '410': { $ref: '#/components/responses/Problem' }
+  /auth/password/forgot:
+    post:
+      tags: [auth]
+      summary: Email a reset link
+      security: []
+      description: |
+        Always 202 for a valid email, whether or not an account exists. Links last 30 minutes and work once.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [email], properties: { email: { type: string, format: email } } }
+      responses:
+        '202': { description: Done }
+        '400': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+  /auth/password/reset:
+    post:
+      tags: [auth]
+      summary: Choose a new password with a reset token
+      security: []
+      description: |
+        Signs out every existing session of the account.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [token, password], properties: { token: { type: string }, password: { type: string, minLength: 8, maxLength: 128 } } }
+      responses:
+        '204': { description: Done }
+        '400': { $ref: '#/components/responses/Problem' }
+        '410': { $ref: '#/components/responses/Problem' }
+
+  /tasks/{id}/review:
+    post:
+      tags: [tasks]
+      summary: Pass or fail internal review. Reviewer or admin area only.
+      description: |
+        Task must be IN_REVIEW (409 otherwise). FAIL needs a note; the task returns to IN_PROGRESS and its rework count rises.
+        PASS on a clientFacing task creates a new approval version for the client (creating the deliverable if needed) and
+        moves the task to CLIENT_APPROVAL; otherwise the task becomes DONE. Notes are stored as INTERNAL comments.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReviewInput' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskDetail' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+
+  /approvals:
+    get:
+      tags: [approvals]
+      summary: Approvals on projects the caller may see. Staff and client roles.
+      description: |
+        Same visibility as GET /projects/{id}. Sorted PENDING first, then newest.
+      parameters:
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/ApprovalStatus' } }
+        - { name: projectId, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/ApprovalItem' } }
+        '403': { $ref: '#/components/responses/Problem' }
+  /approvals/{id}:
+    get:
+      tags: [approvals]
+      summary: Approval with every version and pinned comment
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApprovalDetail' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /approvals/{id}/decision:
+    post:
+      tags: [approvals]
+      summary: Approve or request changes. Client roles only.
+      description: |
+        Only the latest version of a PENDING approval can be decided (409 otherwise). REQUEST_CHANGES needs a note,
+        adds one to revisionsUsed, reopens the linked task with the note as a CLIENT comment, and puts the deliverable
+        back IN_PROGRESS. Going past revisionsAllowed is allowed but logged INTERNAL for the project owner to discuss
+        extra charges. APPROVE marks the deliverable APPROVED and the linked task DONE.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApprovalDecisionInput' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApprovalDetail' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /approvals/{id}/comments:
+    post:
+      tags: [approvals]
+      summary: Pin a comment to a spot on the latest version
+      description: |
+        x and y are percentages of the page. Comments on older versions are refused (409).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NewPinComment' }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PinComment' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+
+  /client/team:
+    get:
+      tags: [client-team]
+      summary: The caller's company people and projects. CLIENT_OWNER only.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientTeam' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /client/team/invites:
+    post:
+      tags: [client-team]
+      summary: Invite a representative. CLIENT_OWNER only.
+      description: |
+        Creates a CLIENT_REP in PENDING_APPROVAL. A Webinger Super Admin approves before the invite email is sent.
+        Projects must belong to the caller's organisation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RepInvite' }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientTeamMember' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /client/team/{id}:
+    patch:
+      tags: [client-team]
+      summary: Change a representative's projects, billing access or access. CLIENT_OWNER only.
+      description: |
+        404 for anyone outside the caller's organisation or not a CLIENT_REP. suspended=true also revokes their sessions.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RepPatch' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientTeamMember' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /admin/users:
+    get:
+      tags: [admin]
+      summary: All accounts. SUPER_ADMIN only.
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { name: role, in: query, schema: { $ref: '#/components/schemas/Role' } }
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/AccountStatus' } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/AdminUser' } }
+        '403': { $ref: '#/components/responses/Problem' }
+  /admin/users/invites:
+    post:
+      tags: [admin]
+      summary: Invite a user. SUPER_ADMIN only.
+      description: |
+        Role must match the organisation kind (staff roles in the agency, client roles in a client, and so on).
+        Sends a 7-day invite link. Two-step sign-in is forced on for SUPER_ADMIN and MANAGER.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UserInvite' }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminUser' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /admin/users/{id}/approve:
+    post:
+      tags: [admin]
+      summary: Approve a representative a client owner invited, and send the invite
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminUser' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /admin/users/{id}/suspend:
+    post:
+      tags: [admin]
+      summary: Suspend and sign out everywhere
+      description: |
+        Refused for yourself and for the last active SUPER_ADMIN (409).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminUser' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /admin/users/{id}/reactivate:
+    post:
+      tags: [admin]
+      summary: Lift a suspension
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminUser' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /admin/users/{id}/reset:
+    post:
+      tags: [admin]
+      summary: Email a password reset link (or re-send the invite)
+      description: |
+        Admins never see or set passwords.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Done }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /admin/users/{id}/logout:
+    post:
+      tags: [admin]
+      summary: Revoke every session of the user
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Done }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /admin/organisations:
+    get:
+      tags: [admin]
+      summary: Organisations for the invite form. SUPER_ADMIN only.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Organisation' } }
+        '403': { $ref: '#/components/responses/Problem' }
+  /admin/login-history:
+    get:
+      tags: [admin]
+      summary: Latest 100 sign-in attempts. SUPER_ADMIN only.
+      parameters:
+        - { name: userId, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/LoginEvent' } }
+        '403': { $ref: '#/components/responses/Problem' }
+
+  /settings:
+    get:
+      tags: [settings]
+      summary: Portal settings. Agency staff.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PortalSettings' }
+        '403': { $ref: '#/components/responses/Problem' }
+    put:
+      tags: [settings]
+      summary: Save portal settings. SUPER_ADMIN only.
+      description: |
+        close after open; at least one day; first reply 1-72 h; resolution 1-720 h and not shorter than first reply;
+        manager discount 0-50 %; money limits not negative; revisions 1-10; reminder 1-14 days.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PortalSettings' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PortalSettings' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+
 components:
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
@@ -323,6 +747,10 @@ components:
         organisationId: { type: string }
         organisationName: { type: string }
         title: { type: string }
+        permissions:
+          type: array
+          items: { type: string, enum: [BILLING_VIEW, TEAM_MANAGE] }
+          description: Grants on top of the role
     Session:
       type: object
       required: [user, accessToken, expiresAt]
@@ -366,6 +794,7 @@ components:
         checklistDone: { type: integer }
         checklistTotal: { type: integer }
         commentCount: { type: integer }
+        reviewerId: { type: string }
     Approval:
       type: object
       required: [id, title, projectName, submittedAt, revisionsUsed, revisionsAllowed]
@@ -698,3 +1127,213 @@ components:
       properties:
         text: { type: string, minLength: 1, maxLength: 2000 }
         visibility: { $ref: '#/components/schemas/Visibility' }
+
+    # ---------- Week 3 ----------
+    MfaChallenge:
+      type: object
+      required: [mfaRequired, mfaToken, method]
+      properties:
+        mfaRequired: { type: boolean, enum: [true] }
+        mfaToken: { type: string }
+        method: { type: string }
+    InviteInfo:
+      type: object
+      required: [name, email, role, organisationName, expiresAt]
+      properties:
+        name: { type: string }
+        email: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        organisationName: { type: string }
+        expiresAt: { type: string, format: date-time }
+    ReviewInput:
+      type: object
+      required: [result]
+      properties:
+        result: { type: string, enum: [PASS, FAIL] }
+        note: { type: string, maxLength: 2000, description: Required (5+ characters) for FAIL }
+    ApprovalStatus: { type: string, enum: [PENDING, APPROVED, CHANGES_REQUESTED] }
+    AssetKind: { type: string, enum: [IMAGE, PDF] }
+    ApprovalItem:
+      type: object
+      required: [id, title, projectId, projectName, kind, status, versionNumber, submittedAt, thumbnailUrl, revisionsUsed, revisionsAllowed, commentCount]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        projectId: { type: string }
+        projectName: { type: string }
+        kind: { $ref: '#/components/schemas/AssetKind' }
+        status: { $ref: '#/components/schemas/ApprovalStatus' }
+        versionNumber: { type: integer }
+        submittedAt: { type: string, format: date-time }
+        thumbnailUrl: { type: string, description: Short-lived signed link }
+        revisionsUsed: { type: integer }
+        revisionsAllowed: { type: integer }
+        commentCount: { type: integer }
+    ApprovalDecision:
+      type: object
+      required: [status, byName, at]
+      properties:
+        status: { type: string, enum: [APPROVED, CHANGES_REQUESTED] }
+        byName: { type: string }
+        at: { type: string, format: date-time }
+        note: { type: string }
+    AssetVersion:
+      type: object
+      required: [id, number, fileName, pages, submittedAt, submittedBy]
+      properties:
+        id: { type: string }
+        number: { type: integer }
+        fileName: { type: string }
+        pages: { type: array, items: { type: string }, description: Preview image per page (PDFs rendered server-side), signed links }
+        submittedAt: { type: string, format: date-time }
+        submittedBy: { type: string }
+        note: { type: string }
+        decision: { $ref: '#/components/schemas/ApprovalDecision' }
+    PinComment:
+      type: object
+      required: [id, versionId, page, x, y, authorId, author, fromAgency, at, text]
+      properties:
+        id: { type: string }
+        versionId: { type: string }
+        page: { type: integer, minimum: 0 }
+        x: { type: number, minimum: 0, maximum: 100 }
+        y: { type: number, minimum: 0, maximum: 100 }
+        authorId: { type: string }
+        author: { type: string }
+        fromAgency: { type: boolean }
+        at: { type: string, format: date-time }
+        text: { type: string }
+    ApprovalDetail:
+      allOf:
+        - $ref: '#/components/schemas/ApprovalItem'
+        - type: object
+          required: [deliverableId, clientName, versions, comments]
+          properties:
+            deliverableId: { type: string }
+            clientName: { type: string }
+            versions: { type: array, items: { $ref: '#/components/schemas/AssetVersion' }, description: Oldest first }
+            comments: { type: array, items: { $ref: '#/components/schemas/PinComment' }, description: Oldest first }
+    ApprovalDecisionInput:
+      type: object
+      required: [versionId, decision]
+      properties:
+        versionId: { type: string }
+        decision: { type: string, enum: [APPROVE, REQUEST_CHANGES] }
+        note: { type: string, maxLength: 2000, description: Required (5+ characters) for REQUEST_CHANGES }
+    NewPinComment:
+      type: object
+      required: [versionId, page, x, y, text]
+      properties:
+        versionId: { type: string }
+        page: { type: integer, minimum: 0 }
+        x: { type: number, minimum: 0, maximum: 100 }
+        y: { type: number, minimum: 0, maximum: 100 }
+        text: { type: string, minLength: 1, maxLength: 1000 }
+    AccountStatus: { type: string, enum: [ACTIVE, INVITED, PENDING_APPROVAL, SUSPENDED] }
+    ClientTeamMember:
+      type: object
+      required: [id, name, email, role, status, projectIds, canSeeBilling]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        email: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        title: { type: string }
+        status: { $ref: '#/components/schemas/AccountStatus' }
+        projectIds: { type: array, items: { type: string } }
+        canSeeBilling: { type: boolean }
+        invitedAt: { type: string, format: date-time }
+        lastLoginAt: { type: string, format: date-time }
+    ClientTeam:
+      type: object
+      required: [members, projects]
+      properties:
+        members: { type: array, items: { $ref: '#/components/schemas/ClientTeamMember' } }
+        projects: { type: array, items: { $ref: '#/components/schemas/IdName' } }
+    RepInvite:
+      type: object
+      required: [name, email, projectIds, canSeeBilling]
+      properties:
+        name: { type: string, minLength: 2 }
+        email: { type: string, format: email }
+        title: { type: string }
+        projectIds: { type: array, minItems: 1, items: { type: string } }
+        canSeeBilling: { type: boolean }
+    RepPatch:
+      type: object
+      minProperties: 1
+      properties:
+        projectIds: { type: array, minItems: 1, items: { type: string } }
+        canSeeBilling: { type: boolean }
+        suspended: { type: boolean }
+    AdminUser:
+      type: object
+      required: [id, name, email, role, organisationId, organisationName, status, mfaEnabled, createdAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        email: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        organisationId: { type: string }
+        organisationName: { type: string }
+        title: { type: string }
+        status: { $ref: '#/components/schemas/AccountStatus' }
+        mfaEnabled: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        lastLoginAt: { type: string, format: date-time }
+        invitedBy: { type: string }
+    UserInvite:
+      type: object
+      required: [name, email, role, organisationId]
+      properties:
+        name: { type: string, minLength: 2 }
+        email: { type: string, format: email }
+        role: { $ref: '#/components/schemas/Role' }
+        organisationId: { type: string }
+        title: { type: string }
+    Organisation:
+      type: object
+      required: [id, name, kind]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        kind: { type: string, enum: [AGENCY, CLIENT, INFLUENCER, PARTNER] }
+    LoginEvent:
+      type: object
+      required: [id, userName, email, at, result, ip, device]
+      properties:
+        id: { type: string }
+        userId: { type: string }
+        userName: { type: string }
+        email: { type: string }
+        at: { type: string, format: date-time }
+        result: { type: string, enum: [SUCCESS, FAILED, MFA_FAILED, LOCKED] }
+        ip: { type: string }
+        device: { type: string }
+    PortalSettings:
+      type: object
+      required: [businessHours, responseTimes, approvalLimits, defaultRevisions, reminderAfterDays]
+      properties:
+        businessHours:
+          type: object
+          required: [days, open, close, timezone]
+          properties:
+            days: { type: array, items: { type: integer, minimum: 0, maximum: 6 }, description: 0 = Sunday }
+            open: { type: string, pattern: '^\\d{2}:\\d{2}$' }
+            close: { type: string, pattern: '^\\d{2}:\\d{2}$' }
+            timezone: { type: string }
+        responseTimes:
+          type: object
+          required: [firstReplyHours, ticketResolutionHours]
+          properties:
+            firstReplyHours: { type: integer }
+            ticketResolutionHours: { type: integer }
+        approvalLimits:
+          type: object
+          required: [managerDiscountPercent, managerSpendLimit, deputyPayoutLimit]
+          properties:
+            managerDiscountPercent: { type: number }
+            managerSpendLimit: { type: number, description: INR }
+            deputyPayoutLimit: { type: number, description: INR }
+        defaultRevisions: { type: integer }
+        reminderAfterDays: { type: integer }

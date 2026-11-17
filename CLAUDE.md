@@ -272,8 +272,8 @@ Week estimates assume one or two developers with AI assistance.
 | --- | --- | --- |
 | 1 | Scaffold, tokens, base components, API contract v0, mock layer, login, role routing, app shell, home dashboard per area | **Done** |
 | 2 | Projects and tasks | **Done** |
-| 3 | Approvals, review queue, client team, admin users & settings, password reset | Next |
-| 4 | Messages and files | |
+| 3 | Approvals, review queue, client team, admin users & settings, password reset | **Done** |
+| 4 | Messages and files | Next |
 | 5 | Finance, billing, client reports | |
 | 6 | Sales pipeline, people, performance | |
 | 7 | Influencer portal, partner portal, discovery | |
@@ -290,7 +290,7 @@ Week estimates assume one or two developers with AI assistance.
 - Verified in a browser: all seven roles; Client Rep sees only their project and no billing; Manager blocked from Finance; client redirected away from /admin; desktop and 390 px phone.
 - Not yet verified: `npm run build` with real dependencies.
 
-Demo accounts (password `demo1234`): admin@webinger.in (Super Admin), manager@webinger.in, priya@webinger.in (Employee), arjun@terrafoods.in (Client Owner, Terra Foods), neha@terrafoods.in (Client Rep), sameer@novaclinics.in (Client Owner, Nova Clinics), ananya@creator.in (Influencer), hello@lensworks.in (Partner). All names invented.
+Demo accounts (password `demo1234`; Super Admin and Manager also need the two-step code `123456`): admin@webinger.in (Super Admin), isha@webinger.in (second Super Admin), manager@webinger.in, priya@webinger.in (Employee), arjun@terrafoods.in (Client Owner, Terra Foods), neha@terrafoods.in (Client Rep), sameer@novaclinics.in (Client Owner, Nova Clinics), farah@sunriseretail.in (Client Owner, 40 projects), ananya@creator.in (Influencer), hello@lensworks.in (Partner). All names invented.
 
 ### Week 2 — Projects and tasks (Done, 2026-11-17)
 What was built (spec below kept for reference):
@@ -301,7 +301,7 @@ What was built (spec below kept for reference):
 - Shared components: `src/components/projects.jsx`, `src/components/tasks.jsx` (TaskDrawer, TaskBoard, TaskRow), new UI kit pieces (Select, SearchInput, Segmented, Pagination, Drawer), new badges in `status.jsx`, styles in `src/styles/work.css`.
 - Mock data: 4 more staff, client **Sunrise Retail Group** with 40 generated projects (login farah@sunriseretail.in), milestones, deliverables, activity, 21 hand-written + generated tasks with checklists, files, comments.
 - Verified: `npm run build` passes; 30 access-rule checks against the handlers pass; driven in headless Edge at 1366 px and 390 px (admin filters/pagination, optimistic move rolled back by the review rule, drag to Done, checklist, comment validation + visibility reset, client 404 on another company's project, rep sees 1 project, no horizontal scroll on phone).
-- Note: components and pages are `.jsx` (not `.tsx`); types, API and mock layers are `.ts`.
+- Note: components and pages are `.jsx` (not `.tsx`); types, API and mock layers are `.ts`. **Owner's standing rule: all new UI files stay `.jsx`.**
 
 Original spec:
 - Contract: `GET /projects` (filter status, health, client, service, owner; paginated), `GET /projects/{id}` (milestones, deliverables, team, activity), `GET /tasks` (mine, by project, by status), `GET /tasks/{id}`, `PATCH /tasks/{id}` (status, assignee, due), `POST /tasks/{id}/comments`.
@@ -311,7 +311,24 @@ Original spec:
 - Employee `/employee/tasks`: list + kanban (To do, In progress, In review, With client, Done), filters, task detail drawer with checklist, files list, comments with internal / client-visible toggle.
 - Mock data: milestones, deliverables, activity, more tasks.
 
-### Week 3 — Approvals, users, settings
+### Week 3 — Approvals, users, settings (Done, 2026-11-17)
+What was built (spec below kept for reference):
+- Contract v0.3.0 (38 paths): `POST /auth/mfa/verify`, `GET /auth/invites/{token}`, `POST /auth/invites/{token}/accept`, `POST /auth/password/forgot` (always 202), `POST /auth/password/reset`; `POST /tasks/{id}/review`; `GET /approvals`, `GET /approvals/{id}`, `POST /approvals/{id}/decision`, `POST /approvals/{id}/comments`; `GET /client/team`, `POST /client/team/invites`, `PATCH /client/team/{id}`; `GET /admin/users`, `POST /admin/users/invites`, `POST /admin/users/{id}/approve|suspend|reactivate|reset|logout`, `GET /admin/organisations`, `GET /admin/login-history`; `GET/PUT /settings`. `/auth/login` now returns a Session **or** an MfaChallenge.
+- Mock split into modules: `handlers.ts` (projects, tasks, review, shared rule helpers), `approvals.ts`, `accounts.ts` (sign-in, sessions, invites/resets, admin users, client team, settings, demo outbox), `art.ts` (SVG placeholder artwork).
+- Rules the backend must copy (all marked `BACKEND:` in the mock):
+  - Every request re-checks the account: suspended, or session issued before `sessionsRevokedAt` → 401. Force logout, suspension and password reset all revoke sessions.
+  - Login: same 401 for unknown email and wrong password; 5 failures in 15 min → 429; suspended + right password → 403; SUPER_ADMIN/MANAGER always get a two-step challenge (token single use, 5 min).
+  - Invite links 7 days, reset links 30 min, both single use (410 after). Password: 8+ chars with a letter and a number. Forgot-password never reveals whether an email exists.
+  - Users/settings: SUPER_ADMIN only. Cannot suspend yourself or the last active Super Admin. Role must match organisation kind. Admin never sees or sets passwords.
+  - Client team: CLIENT_OWNER only, own organisation only; reps invited by the owner wait in PENDING_APPROVAL until a Super Admin approves; billing visibility is a `BILLING_VIEW` permission on the user (owners always, reps when granted). Nav items can now require a `permission` as well as `roles`.
+  - Internal review: only the named reviewer or admin area; task must be IN_REVIEW; FAIL needs a note and counts a rework (`reviewFailures`). PASS on client-facing work goes through `sendToClient`, which creates the deliverable/approval and a new version; any move to "With client" uses the same path.
+  - Approvals: only client roles decide; only the latest version of a PENDING approval; request changes needs a note, adds a revision, reopens the linked task with the client's note; going past the contract limit is allowed but logged INTERNAL for the project owner (automation rule 7). Pins only on the latest version.
+- Screens: `/client/approvals` (+ `/:id` viewer with page thumbnails, numbered pins placed by clicking, version history, decide panel with revision-limit warning), `/employee/review` (queue + panel; stacked on phones), `/client/team`, `/admin/settings` (Users with pending-approval card, invite drawer, inline-confirmed suspend/sign-out; Login history; Business settings with validation and sticky save bar), `/login` (two-step step, forgot link, "why you were signed out" notice), `/forgot-password`, `/reset-password`, `/accept-invite`. Real pages are wrapped in a role/permission guard in `App.jsx`.
+- Prototype aids: a **demo inbox** (`api.demo.outbox`, `DemoEmail` component) shows the email the system would have sent so invite/reset links can be opened; "View as" fills the two-step code itself.
+- Verified: build passes; 68 new + 30 Week 2 access-rule checks pass; 40 browser checks in headless Edge (two-step, approve rep, invite → accept → signed in, suspend, settings validation/save, manager blocked, review send-back, pin + approve, team invite + billing grant reflected in the rep's nav, over-limit warning, forgot → reset → old password refused, phone layouts without horizontal scroll); Week 2 browser checks still pass.
+- Known limits: data lives in each tab's memory, so a forced logout only shows in the same tab; a session ended elsewhere is noticed on the next API call (cached screens can show up to 30 s longer). Phase 1: admins/managers set up two-step during invite acceptance.
+
+Original spec:
 - Client `/client/approvals`: queue, asset viewer (image/PDF), pinned comments, approve / request changes, revision counter vs limit, version history.
 - Employee `/employee/review`: internal review pass/fail with notes.
 - Client `/client/team` (owner only): invite representative, choose projects, billing visibility.
@@ -370,7 +387,7 @@ Original spec:
 6. Use tokens only; brand red never for errors.
 7. Mock names and companies are invented; mock dates relative to today via `day(offset)`.
 8. Money in INR via `formatINR`; dates via `formatDate` / `dueLabel`.
-9. New page: add to `NAV` in `src/layout/nav.ts` (with `week` and optional `roles`), then register the real component in `App.tsx` in place of `Placeholder`.
+9. New page: add to `NAV` in `src/layout/nav.ts` (with `week` and optional `roles` / `permission`), then register the real component in `PAGES` (or `DETAIL_ROUTES`) in `App.jsx`. New UI files are `.jsx`.
 10. Never put tokens in localStorage. Never send real client data to tools whose free projects are public.
 
 ## 13. Project structure
@@ -378,16 +395,19 @@ Original spec:
 docs/api/openapi.yaml      contract shared with the Spring Boot backend
 src/api/client.ts          only place that talks to a backend
 src/api/queries.ts         TanStack Query client, cache keys, hooks (reads + mutations)
-src/api/mock/              fake data + handlers (reference for backend access rules)
+src/api/mock/              fake data + handlers (reference for backend access rules):
+                           handlers.ts, approvals.ts, accounts.ts, data.ts, art.ts
 src/auth/                  AuthContext, RequireArea guard
 src/components/ui/         base components and format helpers
 src/components/status.jsx  health, task, project, deliverable, priority, visibility badges
 src/components/projects.jsx milestone timeline, deliverables, team, activity feed
 src/components/tasks.jsx   task drawer, kanban board, task rows
+src/components/approvals.jsx asset viewer with pins, revision meter, approval badge
+src/components/auth.jsx    auth layout, new-password fields, demo inbox
 src/components/Logo.jsx    placeholder wordmark
 src/layout/                AppShell, nav per role, shell.css
 src/pages/<area>/          screens per portal area
-src/styles/                tokens.css, global.css, work.css (Week 2 components)
+src/styles/                tokens.css, global.css, work.css (Week 2), week3.css (Week 3)
 ```
 
 ---
@@ -446,7 +466,7 @@ src/styles/                tokens.css, global.css, work.css (Week 2 components)
 - [ ] CA review (GST invoice format, TDS) and lawyer review (privacy policy, agreements)
 
 ## 18. Current state and next action
-- Weeks 1 and 2 are done; `npm run build` passes. On a new machine: `npm install`, `cp .env.example .env`, `npm run dev`.
+- Weeks 1, 2 and 3 are done; `npm run build` passes. On a new machine: `npm install`, `cp .env.example .env`, `npm run dev`.
 - Push to a private GitHub repo and connect Cloudflare Pages so reviewers see every push.
-- Week 3 can reuse Week 2 pieces: the review queue is tasks with `reviewerId = me` and status IN_REVIEW (already returned by `GET /tasks`); approvals hang off deliverables in CLIENT_APPROVAL.
-- **Next: start Week 3 (approvals, review queue, users, settings) as described in section 10.**
+- Week 4 can reuse: business hours and response times from `GET /settings` (chat banner and response clocks), the `Visibility` flag for internal notes, `DemoEmail` for notification previews, and the pinned-comment pattern for file comments.
+- **Next: start Week 4 (messages and files) as described in section 10.**

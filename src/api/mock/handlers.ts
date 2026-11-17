@@ -351,7 +351,8 @@ export function getProject(user: User, id: string): ProjectDetail {
 
   const team: TeamMember[] = p.memberIds
     .map((mid) => userById(mid))
-    .filter((u): u is UserRow => !!u)
+    // BACKEND: only active accounts appear in a project's team; pending or suspended people stay hidden.
+    .filter((u): u is UserRow => !!u && u.status === 'ACTIVE')
     .map((u) => ({
       id: u.id,
       name: u.name,

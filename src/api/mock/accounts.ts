@@ -144,7 +144,7 @@ export function checkSession(session: Session): User {
   if (!row) throw unauthorized('Please sign in again.');
   if (row.status === 'SUSPENDED') throw unauthorized('This account was suspended.');
   const issuedAt = Number(session.accessToken.split('.')[2] ?? 0);
-  if (row.sessionsRevokedAt && issuedAt <= Date.parse(row.sessionsRevokedAt)) throw unauthorized('You were signed out by an administrator. Sign in again.');
+  if (row.sessionsRevokedAt && issuedAt <= Date.parse(row.sessionsRevokedAt)) throw unauthorized('Your session ended, either after a password change or because an administrator signed you out. Sign in again.');
   return toPublicUser(row);
 }
 

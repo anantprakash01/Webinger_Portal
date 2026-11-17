@@ -184,6 +184,9 @@ function UsersTab({ onHistory }) {
                       </td>
                       <td data-label="Last sign-in" className="small">
                         {u.lastLoginAt ? timeAgo(u.lastLoginAt) : <span className="muted">Never</span>}
+                        <button type="button" className="link-btn" onClick={() => onHistory(u.id)} aria-label={`Sign-in history for ${u.name}`}>
+                          History
+                        </button>
                       </td>
                       <td data-label="Actions" style={{ textAlign: 'right' }}>
                         {asking ? (
@@ -230,9 +233,6 @@ function UsersTab({ onHistory }) {
                                 Reactivate
                               </Button>
                             )}
-                            <Button size="sm" variant="ghost" onClick={() => onHistory(u.id)}>
-                              History
-                            </Button>
                           </span>
                         )}
                       </td>

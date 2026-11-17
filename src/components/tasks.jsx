@@ -156,8 +156,18 @@ function TaskDetailBody({ task, canManage, assignees, projectLink }) {
   const { user } = useAuth();
   const update = useUpdateTask();
   const checklist = useSetChecklistItem();
+  // Ticks show instantly from local state until the server answers (or rolls back).
+  const [ticking, setTicking] = useState({});
+  const isDone = (c) => ticking[c.id] ?? c.done;
+  const tick = (itemId, value) => {
+    setTicking((t) => ({ ...t, [itemId]: value }));
+    checklist.mutate(
+      { id: task.id, itemId, done: value },
+      { onSettled: () => setTicking(({ [itemId]: _, ...rest }) => rest) },
+    );
+  };
   const mayEdit = canManage || task.assigneeId === user?.id || task.reviewerId === user?.id;
-  const done = task.checklist.filter((c) => c.done).length;
+  const done = task.checklist.filter(isDone).length;
   const err = update.error ?? checklist.error;
 
   const patch = (p) => update.mutate({ id: task.id, patch: p });
@@ -271,12 +281,12 @@ function TaskDetailBody({ task, canManage, assignees, projectLink }) {
           <ul className="checklist">
             {task.checklist.map((c) => (
               <li key={c.id}>
-                <label className={cx('checklist__item', c.done && 'is-done')}>
+                <label className={cx('checklist__item', isDone(c) && 'is-done')}>
                   <input
                     type="checkbox"
-                    checked={c.done}
+                    checked={isDone(c)}
                     disabled={!mayEdit}
-                    onChange={(e) => checklist.mutate({ id: task.id, itemId: c.id, done: e.target.checked })}
+                    onChange={(e) => tick(c.id, e.target.checked)}
                   />
                   <span>{c.text}</span>
                 </label>

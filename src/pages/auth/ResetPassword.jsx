@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { LuArrowLeft } from 'react-icons/lu';
 import { api } from '@/api/client';
+import { useAuth } from '@/auth/AuthContext';
 import { AuthLayout, FormError, NewPasswordFields, validateNewPassword } from '@/components/auth';
 import { Button } from '@/components/ui';
 
@@ -9,6 +10,7 @@ export function ResetPasswordPage() {
   const [params] = useSearchParams();
   const token = params.get('token');
   const navigate = useNavigate();
+  const { user, logout } = useAuth();
   const [value, setValue] = useState({ password: '', confirm: '' });
   const [errors, setErrors] = useState({});
   const [formError, setFormError] = useState(null);
@@ -23,6 +25,8 @@ export function ResetPasswordPage() {
     setBusy(true);
     try {
       await api.auth.resetPassword(token, value.password);
+      // The reset ended every session, including one open on this device.
+      if (user) await logout();
       navigate('/login', { replace: true, state: { notice: 'Password changed. Sign in with your new password. Other devices were signed out.' } });
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Could not change the password.');

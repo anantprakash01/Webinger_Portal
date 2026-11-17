@@ -44,7 +44,7 @@ export function EmployeeTasks() {
   const update = useUpdateTask();
 
   const scoped = useMemo(
-    () => (data ?? []).filter((t) => (scope === 'mine' ? t.assigneeId === user?.id : t.assigneeId !== user?.id)),
+    () => (data ?? []).filter((t) => (scope === 'mine' ? t.assigneeId === user?.id : t.reviewerId === user?.id)),
     [data, scope, user?.id],
   );
   const projects = useMemo(() => {
@@ -68,7 +68,7 @@ export function EmployeeTasks() {
   if (isPending) return <PageSkeleton />;
   if (error) return <div className="page"><ErrorState message={error.message} onRetry={refetch} /></div>;
 
-  const reviewCount = (data ?? []).filter((t) => t.assigneeId !== user?.id && t.status === 'IN_REVIEW').length;
+  const reviewCount = (data ?? []).filter((t) => t.reviewerId === user?.id && t.status === 'IN_REVIEW').length;
   const openCount = visible.filter((t) => t.status !== 'DONE').length;
   const filtered = !!(project || priority || q);
 

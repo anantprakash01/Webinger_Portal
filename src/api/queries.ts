@@ -93,8 +93,8 @@ export function useUpdateTask() {
   return useMutation({
     mutationFn: ({ id, patch }: { id: string; patch: TaskPatch }) => api.tasks.update(id, patch),
     onMutate: async ({ id, patch }) => {
-      await qc.cancelQueries({ queryKey: ['tasks'] });
-      await qc.cancelQueries({ queryKey: ['projects', 'detail'] });
+      // Write the optimistic change first so the UI never flickers back, then stop
+      // in-flight fetches without letting them restore the old data.
       const snapshot: Snapshot = [
         ...qc.getQueriesData({ queryKey: ['tasks'] }),
         ...qc.getQueriesData({ queryKey: ['projects', 'detail'] }),
@@ -105,6 +105,8 @@ export function useUpdateTask() {
       qc.setQueriesData<{ tasks?: TaskItem[] }>({ queryKey: ['projects', 'detail'] }, (old) =>
         old?.tasks ? { ...old, tasks: old.tasks.map(apply) } : old,
       );
+      await qc.cancelQueries({ queryKey: ['tasks'] }, { revert: false });
+      await qc.cancelQueries({ queryKey: ['projects', 'detail'] }, { revert: false });
       return { snapshot };
     },
     onError: (_err, _vars, ctx) => ctx?.snapshot.forEach(([key, data]) => qc.setQueryData(key, data)),
@@ -119,12 +121,12 @@ export function useSetChecklistItem() {
     mutationFn: ({ id, itemId, done }: { id: string; itemId: string; done: boolean }) =>
       api.tasks.setChecklistItem(id, itemId, done),
     onMutate: async ({ id, itemId, done }) => {
-      await qc.cancelQueries({ queryKey: keys.task(id) });
       const prev = qc.getQueryData<TaskDetail>(keys.task(id));
       if (prev) {
         const checklist = prev.checklist.map((c) => (c.id === itemId ? { ...c, done } : c));
         qc.setQueryData<TaskDetail>(keys.task(id), { ...prev, checklist, checklistDone: checklist.filter((c) => c.done).length });
       }
+      await qc.cancelQueries({ queryKey: keys.task(id) }, { revert: false });
       return { prev };
     },
     onError: (_e, { id }, ctx) => ctx?.prev && qc.setQueryData(keys.task(id), ctx.prev),
