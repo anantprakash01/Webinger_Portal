@@ -780,3 +780,318 @@ export interface ClientPatch {
   /** SUPER_ADMIN only. Pausing or ending a client is a human decision. */
   status?: ClientStatus;
 }
+
+/* ---------- Week 5: finance, billing, client reports ---------- */
+
+export type QuoteStatus = 'DRAFT' | 'SENT' | 'ACCEPTED' | 'DECLINED' | 'EXPIRED';
+export type PaymentMethod = 'BANK_TRANSFER' | 'UPI' | 'CHEQUE' | 'CARD' | 'ONLINE';
+export type ExpenseCategory = 'FREELANCER' | 'PRODUCTION' | 'SOFTWARE' | 'MEDIA' | 'TRAVEL' | 'OFFICE';
+
+/** Seller or buyer block printed on a GST invoice or quote. */
+export interface Party {
+  name: string;
+  legalName: string;
+  gstin?: string;
+  address: string;
+  /** GST state code, e.g. "27" for Maharashtra. */
+  stateCode: string;
+  stateName: string;
+}
+
+export interface LineItemInput {
+  description: string;
+  /** Services accounting code; defaults to 998361 (advertising services). */
+  sac?: string;
+  quantity: number;
+  /** INR before GST. */
+  rate: number;
+  projectId?: string;
+}
+
+export interface LineItem extends Required<Omit<LineItemInput, 'projectId'>> {
+  projectId?: string;
+  projectName?: string;
+  /** quantity × rate, before GST. */
+  amount: number;
+}
+
+/** CGST 9% + SGST 9% inside the agency's state, IGST 18% for other states. */
+export interface TaxLine {
+  label: 'CGST' | 'SGST' | 'IGST';
+  rate: number;
+  amount: number;
+}
+
+export interface InvoiceListItem {
+  id: string;
+  /** Given when the invoice is sent (WEB/2026-27/0113). Drafts have none. */
+  number?: string;
+  clientId: string;
+  clientName: string;
+  title: string;
+  issueDate?: string;
+  due: string;
+  /** DRAFT, SENT, PAID, OVERDUE (sent and past due) or CANCELLED. */
+  status: InvoiceStatus;
+  subtotal: number;
+  tax: number;
+  /** Subtotal + GST. */
+  total: number;
+  /** Payments plus TDS the client deducted. */
+  paid: number;
+  balance: number;
+  /** Whole days past the due date while unpaid. */
+  daysLate?: number;
+}
+
+export interface InvoicePayment {
+  id: string;
+  receiptNumber: string;
+  date: string;
+  /** Money received. */
+  amount: number;
+  /** Tax the client deducted at source; counts towards the balance. */
+  tds: number;
+  method: PaymentMethod;
+  reference?: string;
+  recordedBy: string;
+}
+
+export interface FinanceEvent {
+  id: string;
+  at: string;
+  actor: string;
+  text: string;
+}
+
+export interface InvoiceDetail extends InvoiceListItem {
+  seller: Party;
+  buyer: Party;
+  placeOfSupply: string;
+  items: LineItem[];
+  taxes: TaxLine[];
+  amountInWords: string;
+  notes?: string;
+  payments: InvoicePayment[];
+  cancelReason?: string;
+  /** Staff only: what happened to the invoice (created, sent, reminders, payments). */
+  events?: FinanceEvent[];
+  /** Bank and UPI details printed on the invoice. */
+  payTo: { bank: string; account: string; ifsc: string; upi: string };
+}
+
+export interface NewInvoice {
+  clientId: string;
+  title: string;
+  /** Date the client must pay by (yyyy-mm-dd). */
+  due: string;
+  items: LineItemInput[];
+  notes?: string;
+}
+
+export interface PaymentInput {
+  date: string;
+  amount: number;
+  tds?: number;
+  method: PaymentMethod;
+  reference?: string;
+}
+
+export interface QuoteListItem {
+  id: string;
+  number: string;
+  clientId: string;
+  clientName: string;
+  title: string;
+  kind: 'RETAINER' | 'PROJECT';
+  subtotal: number;
+  total: number;
+  validUntil: string;
+  status: QuoteStatus;
+  sentAt?: string;
+  decidedAt?: string;
+  decidedBy?: string;
+}
+
+export interface QuoteDetail extends QuoteListItem {
+  seller: Party;
+  buyer: Party;
+  items: LineItem[];
+  taxes: TaxLine[];
+  /** Retainers: number of months. Projects: weeks to deliver. */
+  termMonths?: number;
+  revisionsPerDeliverable: number;
+  notes?: string;
+  declineReason?: string;
+  /** Set when accepted: the contract it became and the advance invoice drafted for it. */
+  contractId?: string;
+  advanceInvoiceId?: string;
+  events?: FinanceEvent[];
+}
+
+export interface NewQuote {
+  clientId: string;
+  title: string;
+  kind: 'RETAINER' | 'PROJECT';
+  termMonths?: number;
+  revisionsPerDeliverable: number;
+  validDays: number;
+  items: LineItemInput[];
+  notes?: string;
+}
+
+export interface PaymentItem extends InvoicePayment {
+  invoiceId: string;
+  invoiceNumber: string;
+  clientId: string;
+  clientName: string;
+}
+
+export interface ExpenseItem {
+  id: string;
+  date: string;
+  category: ExpenseCategory;
+  vendor: string;
+  description: string;
+  /** Before GST. */
+  amount: number;
+  /** Input GST paid on the bill (claimable). */
+  gst: number;
+  projectId?: string;
+  projectName?: string;
+  clientName?: string;
+  recordedBy: string;
+}
+
+export interface NewExpense {
+  date: string;
+  category: ExpenseCategory;
+  vendor: string;
+  description: string;
+  amount: number;
+  gst?: number;
+  projectId?: string;
+}
+
+export interface FinanceSummary {
+  /** Money received this calendar month. */
+  collectedThisMonth: number;
+  /** Invoices sent this month, before GST. */
+  invoicedThisMonth: number;
+  /** Running retainer contracts, per month, before GST. */
+  recurringRevenue: number;
+  outstanding: number;
+  overdue: number;
+  overdueCount: number;
+  /** Average days from invoice date to full payment, last 6 months. */
+  daysToCollect?: number;
+  expensesThisMonth: number;
+  draftInvoices: number;
+  openQuotes: { count: number; value: number };
+  /** Accepted ÷ decided quotes. */
+  winRate?: number;
+  /** invoiced = totals incl. GST, so it compares with money collected; expenses before GST. */
+  months: Array<{ month: string; invoiced: number; collected: number; expenses: number }>;
+  byService: Array<{ service: string; amount: number }>;
+}
+
+export interface ProfitRow {
+  id: string;
+  name: string;
+  clientName?: string;
+  service?: string;
+  /** Invoiced, before GST, excluding drafts and cancelled invoices. */
+  revenue: number;
+  hours: number;
+  labourCost: number;
+  directCost: number;
+  profit: number;
+  /** profit ÷ revenue, 0–1. Undefined when nothing is invoiced yet. */
+  margin?: number;
+}
+
+export interface ProfitReport {
+  clients: ProfitRow[];
+  projects: ProfitRow[];
+}
+
+export type ExportKind = 'invoices' | 'payments' | 'expenses';
+export interface ExportFile {
+  fileName: string;
+  content: string;
+  rows: number;
+}
+export interface ExportLogItem {
+  id: string;
+  at: string;
+  by: string;
+  kind: ExportKind;
+  from: string;
+  to: string;
+  rows: number;
+}
+
+/** GET /billing: everything the client's billing page needs. */
+export interface BillingOverview {
+  outstanding: number;
+  overdue: number;
+  nextDue?: { invoiceId: string; number: string; due: string; balance: number };
+  invoices: InvoiceListItem[];
+  quotes: QuoteListItem[];
+  contracts: ClientContract[];
+  payments: PaymentItem[];
+  /** Only the client owner may accept or decline quotes. */
+  canAccept: boolean;
+}
+
+/* ---------- Week 5: client reports ---------- */
+
+export type MetricUnit = 'NUMBER' | 'PERCENT' | 'INR' | 'SECONDS';
+
+export interface MetricValue {
+  key: string;
+  label: string;
+  unit: MetricUnit;
+  /** Lower is better, e.g. cost per lead or page load time. */
+  lowerIsBetter?: boolean;
+  value?: number;
+  previous?: number;
+}
+
+export interface ReportSection {
+  service: string;
+  highlight?: string;
+  metrics: MetricValue[];
+}
+
+export interface ClientReport {
+  clientId: string;
+  clientName: string;
+  /** yyyy-mm */
+  month: string;
+  status: 'DRAFT' | 'PUBLISHED' | 'NOT_STARTED';
+  summary: string;
+  sections: ReportSection[];
+  publishedAt?: string;
+  publishedBy?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+  /** Months with a published report, newest first (the client's month picker). */
+  months: string[];
+}
+
+export interface ReportStatusItem {
+  clientId: string;
+  clientName: string;
+  month: string;
+  status: ClientReport['status'];
+  services: string[];
+  filled: number;
+  total: number;
+  updatedAt?: string;
+}
+
+export interface ReportInput {
+  summary: string;
+  sections: Array<{ service: string; highlight?: string; values: Record<string, number | null> }>;
+}

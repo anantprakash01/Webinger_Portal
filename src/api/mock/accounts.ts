@@ -60,7 +60,7 @@ function useToken(token: string, purpose: 'INVITE' | 'RESET' | 'MFA') {
   return t;
 }
 
-function sendEmail(to: string, subject: string, body: string, link?: string) {
+export function sendEmail(to: string, subject: string, body: string, link?: string) {
   outbox.unshift({ id: `em${outbox.length + 1}`, to, subject, body, link, at: now() });
 }
 

@@ -1,0 +1,133 @@
+/* ---------- Week 5: finance, billing, reports ---------- */
+
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+.text-warn { color: var(--warn); }
+.link-btn.row-link { font-weight: 700; }
+
+/* Invoice / quote document (A4-like, prints on its own) */
+.doc {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--s-6);
+  display: grid;
+  gap: var(--s-5);
+  font-size: var(--fs-sm);
+  min-width: 0;
+}
+.doc__head { display: flex; justify-content: space-between; gap: var(--s-4); flex-wrap: wrap; border-bottom: 3px solid var(--ink); padding-bottom: var(--s-4); }
+.doc__brand { font-weight: 800; font-size: var(--fs-xl); letter-spacing: 0.04em; }
+.doc__brand::after { content: '.'; color: var(--brand-red); }
+.doc__title { text-align: right; }
+.doc__kind { font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; }
+.doc__number { font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.doc__label { font-size: var(--fs-xs); color: var(--ink-3); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 2px; }
+.doc__meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--s-3); }
+.doc__parties { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: var(--s-4); }
+.doc__party { display: grid; gap: 2px; line-height: 1.45; }
+.doc__party-name { font-weight: 700; }
+.doc__table-wrap { overflow-x: auto; }
+.doc__table { width: 100%; border-collapse: collapse; min-width: 460px; }
+.doc__table th { text-align: left; font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-3); border-bottom: 1px solid var(--border-strong); padding: var(--s-2); }
+.doc__table td { padding: var(--s-2); border-bottom: 1px solid var(--border); vertical-align: top; }
+.doc__table .num, .doc__table th.num { text-align: right; }
+.doc__bottom { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 300px); gap: var(--s-5); align-items: start; }
+.doc__words { line-height: 1.5; min-width: 0; }
+.doc__totals { display: grid; grid-template-columns: 1fr auto; gap: 6px var(--s-4); margin: 0; font-variant-numeric: tabular-nums; }
+.doc__totals dt { color: var(--ink-2); }
+.doc__totals dd { margin: 0; text-align: right; }
+.doc__grand { font-weight: 800; color: var(--ink) !important; border-top: 1px solid var(--border-strong); padding-top: 6px; }
+.doc__foot { border-top: 1px solid var(--border); padding-top: var(--s-3); }
+@media (max-width: 720px) {
+  .doc { padding: var(--s-4); }
+  .doc__bottom { grid-template-columns: 1fr; }
+  .doc__title { text-align: left; }
+}
+
+.invoice-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: var(--s-5); align-items: start; }
+@media (max-width: 1100px) { .invoice-layout { grid-template-columns: 1fr; } }
+
+/* Line items editor */
+.lines { display: grid; gap: var(--s-3); }
+.lines__row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1.4fr) 70px 110px 40px;
+  gap: var(--s-2);
+  align-items: end;
+  padding-bottom: var(--s-3);
+  border-bottom: 1px dashed var(--border);
+}
+.lines__row:not(:has(.lines__project)) { grid-template-columns: minmax(0, 1fr) 70px 110px 40px; }
+.lines__remove { margin-bottom: 4px; }
+.lines__total { font-variant-numeric: tabular-nums; }
+@media (max-width: 560px) {
+  .lines__row, .lines__row:not(:has(.lines__project)) { grid-template-columns: 1fr 1fr 40px; }
+  .lines__desc, .lines__project { grid-column: 1 / -1; }
+}
+
+/* Client pay box */
+.pay-box {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--s-3) var(--s-5);
+  align-items: center;
+  padding: var(--s-5);
+  border: 2px solid var(--ink);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.pay-box > .btn { justify-self: start; }
+.pay-box__amount { font-size: var(--fs-2xl); font-weight: 800; font-variant-numeric: tabular-nums; }
+.pay-box__alt { grid-column: 1 / -1; margin: 0; }
+@media (max-width: 560px) { .pay-box { grid-template-columns: 1fr; } }
+
+/* Charts. Series colours: validated categorical slots 1 (blue) and 2 (orange). */
+.chart { margin: 0; display: grid; gap: var(--s-3); --series-1: #2a78d6; --series-2: #eb6834; }
+.chart__legend { display: flex; gap: var(--s-4); flex-wrap: wrap; font-size: var(--fs-xs); color: var(--ink-2); }
+.chart__key { display: inline-flex; align-items: center; gap: 6px; }
+.chart__swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.chart__swatch--1, .chart__bar--1 { background: var(--series-1); }
+.chart__swatch--2, .chart__bar--2 { background: var(--series-2); }
+.chart__plot { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--s-2); }
+.chart__group { display: grid; gap: 6px; min-width: 0; }
+.chart__bars {
+  display: flex; align-items: flex-end; justify-content: center; gap: 2px; height: 200px;
+  border-bottom: 1px solid var(--border-strong);
+  background: repeating-linear-gradient(to top, transparent 0, transparent 49px, var(--border) 49px, var(--border) 50px);
+}
+.chart__bar { width: min(30%, 26px); min-height: 2px; border-radius: 4px 4px 0 0; }
+.chart__group:hover .chart__bar { opacity: 0.85; }
+.chart__label { display: grid; justify-items: center; font-size: var(--fs-xs); color: var(--ink-3); }
+.chart__value { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+.hbars { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-3); }
+.hbars__row { display: grid; grid-template-columns: minmax(90px, 160px) 1fr auto; gap: var(--s-3); align-items: center; font-size: var(--fs-sm); }
+.hbars__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hbars__track { height: 10px; background: var(--surface-2); border-radius: 4px; overflow: hidden; }
+.hbars__bar { display: block; height: 100%; background: #2a78d6; border-radius: 4px; }
+.hbars__value { font-variant-numeric: tabular-nums; color: var(--ink-2); min-width: 56px; text-align: right; }
+
+/* Reports */
+.metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); gap: var(--s-3); }
+.metric { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--s-4); display: grid; gap: 4px; }
+.metric__label { font-size: var(--fs-xs); color: var(--ink-3); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+.metric__value { font-size: var(--fs-xl); font-weight: 800; font-variant-numeric: tabular-nums; }
+.metric__change { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; font-size: var(--fs-sm); color: var(--ink-2); }
+.metric__change.is-good { color: var(--ok); }
+.metric__change.is-bad { color: var(--danger); }
+.metric__prev { color: var(--ink-3); font-size: var(--fs-xs); }
+.report__summary { font-size: var(--fs-md); line-height: 1.55; margin: 0 0 var(--s-2); }
+.report__highlight { display: flex; gap: var(--s-2); align-items: flex-start; margin: 0 0 var(--s-3); padding: var(--s-3); background: var(--surface-2); border-radius: var(--radius-sm); font-size: var(--fs-sm); }
+.report-fields { border: 0; padding: 0; margin: 0; display: grid; gap: var(--s-3); min-width: 0; }
+.report-fields legend { margin-bottom: var(--s-2); }
+
+/* Printing: only the document or report, no app chrome */
+@media print {
+  .sidebar, .bottomnav, .topbar, .demo-bar, .no-print, .drawer, .drawer-backdrop, .sheet, .sheet-backdrop { display: none !important; }
+  .main, .shell { display: block !important; margin: 0 !important; padding: 0 !important; }
+  .page { padding: 0 !important; }
+  .doc { border: 0; padding: 0; }
+  .invoice-layout { display: block; }
+  .card { break-inside: avoid; box-shadow: none; }
+  body { background: #fff; }
+}

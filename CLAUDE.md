@@ -275,8 +275,8 @@ Week estimates assume one or two developers with AI assistance.
 | 3 | Approvals, review queue, client team, admin users & settings, password reset | **Done** |
 | 4 | Messages and files | **Done** |
 | 4b | Admin clients (pulled forward from Week 6) | **Done** |
-| 5 | Finance, billing, client reports | Next |
-| 6 | Sales pipeline, people, performance | |
+| 5 | Finance, billing, client reports | **Done** |
+| 6 | Sales pipeline, people, performance | Next |
 | 7 | Influencer portal, partner portal, discovery | |
 | 8 | Automation UI, knowledge base, polish, contract freeze | |
 
@@ -376,7 +376,26 @@ Why early: the nav had Clients tagged "Week 2" while the plan put it in Week 6, 
 - Note for the owner: by this rule all three live demo clients are red (Terra: homepage sign-off milestone passed; Nova: invoice 17 days late; Sunrise: missed store milestones). Project health on `/admin/projects` is still a stored value, not computed by the rule, so a project can say "Needs attention" while its client is red. Compute project health from the same rule in Phase 1.
 - Not built yet: adding contracts (Week 5 finance: accepted quote → contract), client logo/brand fields, export.
 
-### Week 5 — Finance and reports
+### Week 5 — Finance and reports (Done, 2026-11-17)
+What was built (spec below kept for reference). Branch `week-5-finance`, stacked on `addmin-clients` because finance needs client records; merge the Clients PR first.
+- Contract v0.5.0 (79 paths): `/finance/summary`, `/finance/invoices` (+ `/{id}`, `/send`, `/remind`, `/cancel`, `/payments`), `/finance/quotes` (+ `/{id}`, `/send`), `/finance/payments`, `/finance/expenses`, `/finance/profit`, `/finance/projects`, `/finance/export`, `/finance/exports`; `/billing`, `/billing/invoices/{id}` (+ `/pay`), `/billing/quotes/{id}` (+ `/accept`, `/decline`); `/reports`, `/admin/reports`, `/admin/reports/{clientId}/{month}` (+ `/publish`).
+- Mock modules: `finance.ts` (GST maths, numbering, payments, quotes → contracts, profit, CSV export, client billing), `reports.ts` (monthly results, publish rule, dashboard headline numbers), `data5.ts` (seed: 6 months of invoices and payments, quotes, expenses, cost rates, metric templates per service, 3 months of reports). The old static `invoices` list in `data.ts` is gone; dashboards and client health read `finance.ts` (balances, derived overdue).
+- Rules the backend must copy (all marked `BACKEND:`):
+  - `/finance/*` is SUPER_ADMIN only. Managers keep outstanding/retainer on client records.
+  - Invoices start as DRAFT with no number. **Number on send**, next in the financial-year sequence `WEB/2026-27/0098` (row-locked counter, no gaps). Sent invoices can't be edited; cancel with a reason (kept, number never reused); once money is received, a credit note instead (Phase 1). OVERDUE is derived (sent, unpaid, past due), never stored.
+  - GST 18% on the taxable value: CGST 9% + SGST 9% when the place of supply is Maharashtra (27, the agency's state), IGST 18% otherwise. Place of supply = client GSTIN's first two digits, else the client's city. Amount in words uses lakh/crore. SAC default 998361. **CA must confirm** (section 17).
+  - Payments: amount + TDS ≤ balance; TDS ≤ 10% of taxable value; no future dates; receipts `RCPT/yyyy-yy/nnnn`; PAID when the balance reaches 0. Staff can't record "ONLINE" (gateway only).
+  - Client billing needs a client role + BILLING_VIEW, own organisation; drafts and other companies' invoices are 404; the event trail is staff-only. Only CLIENT_OWNER accepts/declines quotes. **Accepting a quote** = one transaction: quote ACCEPTED, contract added to the client record (retainer value counts in MRR at once), advance invoice drafted (first month for retainers, 50% for projects) for a Super Admin to send (automation rule 2; money actions need a person). Sending a quote needs an active owner login (409 otherwise). Expired quotes (SENT past validity) can't be accepted.
+  - "Pay now" in the demo marks the invoice paid. **Phase 2: create a gateway order and mark paid only from the gateway's signed webhook.**
+  - Profit = invoiced before GST − hours × cost rate − direct costs. Cost rates never leave the server. Until time entries (Week 6), project hours are costed at the average rate of its team. Projects billed under a client-wide retainer show costs only.
+  - CSV export (invoices register, payments with TDS, expenses with input GST): max one year, formulas neutralised, every export logged (who, what, range, rows).
+  - Reports: staff (admin area) enter numbers per client/month per service template (Social media, SEO, Paid ads, Website; Branding has none). Publishing needs every number and a summary, lists what's missing (rule 11), not for the current month, emails the client. Clients see PUBLISHED months only and compare with the previous published month; reps see only services of projects they're on. Client dashboard "Results" now comes from the latest published report.
+- Screens: `/admin/finance` (tabs in the URL: Overview with stats, "needs your action", invoiced-by-service bars and a 6-month invoiced vs collected chart; Invoices with search/filters; Quotes with a document drawer; Payments; Expenses + add; Profit by client and project; CA export with log; New invoice / New quote drawers with a line editor and live GST total), `/admin/finance/invoices/:id` (printable GST invoice, send, remind, record payment with TDS, cancel with reason, edit draft, history), `/admin/reports` (status per client and month, editor drawer with last month's numbers, save / publish), `/client/billing` (outstanding, quotes waiting with accept/decline, invoices, contracts, receipts), `/client/billing/invoices/:id` (printable invoice, Pay now, bank/UPI details), `/client/reports` (month picker, summary, metric tiles with better/worse change, print). New nav item: Admin → Client reports. Detail routes can now carry a `guard` (the nav item whose role/permission rule applies).
+- Print: `finance.css` hides the app shell for invoices and reports (browser "Save as PDF"). Server-side PDF is Phase 1.
+- Verified: build + typecheck pass; 123 new + 230 earlier access-rule checks pass; 41 browser checks in headless Edge (overview, filters, IGST vs CGST/SGST, reminder, payment with TDS → Paid, draft → numbered send, quote to a client without login refused, profit, CSV download + log, expense, report publish blocked then published, manager has no finance, client sees no drafts, owner accepts quote → contract, pays online → receipt, other company's invoice hidden, report changes, rep without billing blocked, phone layouts without horizontal scroll); Week 3, 4 and Clients browser suites pass. The Week 2 suite's drag-to-Done check reports false on this machine with or without Week 5 changes (headless drag in this Playwright/Edge build); the Move select path works.
+- Known limits: data lives in each tab's memory (a payment in one browser session is not seen in another); no credit notes, recurring auto-invoices (rule 9), partial TDS certificates or e-invoicing IRN yet; lifetime value on client records is still a stored number.
+
+Original spec:
 - Admin `/admin/finance` (Super Admin only): quotes, invoices (GST fields, sequence numbering), payments, expenses, outstanding, profit per project and client, CA export.
 - Client `/client/billing` (owner): invoices, pay button (mock), receipts, quotes and contracts to accept.
 - Client `/client/reports`: KPIs per service, month picker, print/PDF-friendly layout.
@@ -433,7 +452,7 @@ src/api/client.ts          only place that talks to a backend
 src/api/queries.ts         TanStack Query client, cache keys, hooks (reads + mutations)
 src/api/mock/              fake data + handlers (reference for backend access rules):
                            handlers.ts, approvals.ts, accounts.ts, chat.ts, files.ts,
-                           clients.ts, hours.ts, data.ts, data4.ts, art.ts
+                           clients.ts, finance.ts, reports.ts, hours.ts, data.ts, data4.ts, data5.ts, art.ts
 src/auth/                  AuthContext, RequireArea guard
 src/components/ui/         base components and format helpers
 src/components/status.jsx  health, task, project, deliverable, priority, visibility badges
@@ -442,12 +461,15 @@ src/components/tasks.jsx   task drawer, kanban board, task rows
 src/components/approvals.jsx asset viewer with pins, revision meter, approval badge
 src/components/auth.jsx    auth layout, new-password fields, demo inbox
 src/components/chat.jsx    conversation list, thread, composer, response clock, hours banner
+src/components/finance.jsx printable invoice/quote document, line items editor, finance labels, CSV download
+src/components/reports.jsx metric tile, metric formatting and month-on-month change
+src/pages/admin/finance/   finance tabs and forms used by AdminFinance
 src/api/realtime.ts        live-update transport (polling now, WebSocket in Phase 1)
 src/pages/shared/          screens shared by several areas (MessagesPage)
 src/components/Logo.jsx    placeholder wordmark
 src/layout/                AppShell, nav per role, shell.css
 src/pages/<area>/          screens per portal area
-src/styles/                tokens.css, global.css, work.css (Week 2), week3.css, week4.css, clients.css
+src/styles/                tokens.css, global.css, work.css (Week 2), week3.css, week4.css, clients.css, finance.css
 ```
 
 ---
@@ -506,8 +528,9 @@ src/styles/                tokens.css, global.css, work.css (Week 2), week3.css,
 - [ ] CA review (GST invoice format, TDS) and lawyer review (privacy policy, agreements)
 
 ## 18. Current state and next action
-- Weeks 1–4 and Admin clients are done; `npm run build` passes. On a new machine: `npm install`, `cp .env.example .env`, `npm run dev`.
+- Weeks 1–5 and Admin clients are done; `npm run build` passes. On a new machine: `npm install`, `cp .env.example .env`, `npm run dev`.
 - Push to a private GitHub repo and connect Cloudflare Pages so reviewers see every push.
 - Git workflow: one branch per week from an up-to-date `main` (e.g. `week-5-finance`), pull request into `main`, merge, then start the next week. Never stack a week on an unmerged branch.
 - Week 5 can reuse: client records (`clients.ts`: legal name, GSTIN, address for GST invoices; contracts for recurring billing; `lifetimeValue` and `outstanding` should come from real invoices/payments), `files.ts` signed links for invoice PDFs, `hours.ts` for due dates, `DemoEmail` for invoice emails, ticket clocks for payment reminders.
-- **Next: start Week 5 (finance, billing, client reports) as described in section 10.**
+- Week 6 can reuse: `costRates` and `profitReport` (swap the average-rate costing for time entries), `reports.ts` metric templates for employee scorecards, quote acceptance (`acceptQuote`) as the model for "won deal → client + project".
+- **Next: merge the Clients and Week 5 PRs, then start Week 6 (pipeline, people, performance) as described in section 10.**

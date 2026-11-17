@@ -37,11 +37,12 @@ import { post } from './art';
 // Circular with chat.ts on purpose: both only call each other inside functions.
 import { previewsFor } from './chat';
 import { accountManagerOf } from './clients';
+import { balanceOf, daysLateOf, invoiceSummary, recurringRevenue, unpaidInvoices, invoicedThisMonth } from './finance';
+import { latestResults } from './reports';
 import {
   approvals,
   CLIENT_NAME,
   day,
-  invoices,
   nameOf,
   ORG,
   projects,
@@ -50,12 +51,6 @@ import {
   userById,
 } from './data';
 import type { MilestoneRow, ProjectRow, TaskRow, UserRow } from './data';
-
-const strip = <T extends object, K extends keyof T>(row: T, ...keys: K[]): Omit<T, K> => {
-  const copy = { ...row };
-  for (const k of keys) delete copy[k];
-  return copy;
-};
 
 /* ---------------------------------------------------------------- errors */
 
@@ -170,12 +165,13 @@ const STATUS_ORDER = { ACTIVE: 0, ON_HOLD: 1, COMPLETED: 2 } as const;
 
 export function adminDashboard(user: User): AdminDashboard {
   requireArea(user, 'admin');
-  const overdue = invoices.filter((i) => i.status === 'OVERDUE');
+  const unpaid = unpaidInvoices();
+  const overdue = unpaid.filter((i) => daysLateOf(i) > 0).sort((a, b) => daysLateOf(b) - daysLateOf(a));
   const live = projects.filter((p) => p.status === 'ACTIVE');
   return {
-    revenueThisMonth: 486000,
-    recurringRevenue: 312000,
-    outstanding: invoices.filter((i) => i.status !== 'PAID').reduce((s, i) => s + i.amount, 0),
+    revenueThisMonth: invoicedThisMonth(),
+    recurringRevenue: recurringRevenue(),
+    outstanding: unpaid.reduce((s, i) => s + balanceOf(i), 0),
     overdueTasks: tasks.filter((t) => t.status !== 'DONE' && t.due < day(0)).length,
     activeClients: new Set(live.map((p) => p.organisationId)).size,
     satisfaction: 4.4,
@@ -189,7 +185,7 @@ export function adminDashboard(user: User): AdminDashboard {
       .sort((a, b) => HEALTH_ORDER[a.health] - HEALTH_ORDER[b.health])
       .slice(0, 6)
       .map(toSummary),
-    overdueInvoices: overdue.map((i) => strip(i, 'organisationId')),
+    overdueInvoices: overdue.map(invoiceSummary),
     teamLoad: [
       { name: 'Priya Sharma', department: 'Social', assignedHours: 44, capacityHours: 40 },
       { name: 'Rahul Nair', department: 'SEO', assignedHours: 31, capacityHours: 40 },
@@ -239,15 +235,10 @@ export function clientDashboard(user: User): ClientDashboard {
         };
       }),
     unpaidInvoices: canSeeBilling
-      ? invoices.filter((i) => i.organisationId === org && i.status !== 'PAID').map((i) => strip(i, 'organisationId'))
+      ? unpaidInvoices(org).sort((a, b) => a.due.localeCompare(b.due)).map(invoiceSummary)
       : [],
-    resultsPeriod: 'October 2026',
-    results: [
-      { label: 'Instagram reach', value: '1.84 L', change: '+22%', good: true },
-      { label: 'Engagement rate', value: '4.1%', change: '+0.6 pts', good: true },
-      { label: 'Website visits', value: '12,460', change: '+9%', good: true },
-      { label: 'Leads', value: '86', change: '−4%', good: false },
-    ],
+    // Headline numbers from the latest published monthly report (Week 5).
+    ...latestResults(user),
     messages: previewsFor(user),
     offer: {
       id: 'o1',

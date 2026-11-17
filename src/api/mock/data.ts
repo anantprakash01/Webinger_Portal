@@ -22,7 +22,6 @@ import type {
   ChecklistItem,
   Deliverable,
   Health,
-  InvoiceSummary,
   Priority,
   ProjectStatus,
   Role,
@@ -613,13 +612,7 @@ const generatedTasks: TaskRow[] = generated.flatMap((p, i) => {
 
 export const tasks: TaskRow[] = [...handTasks, ...generatedTasks];
 
-/* ------------------------------------------------------- other week 1 data */
-
-export const invoices: Array<InvoiceSummary & { organisationId: string }> = [
-  { id: 'i1', organisationId: ORG.TERRA, number: 'WEB/2026-27/0112', clientName: 'Terra Foods', amount: 59000, due: day(5), status: 'SENT' },
-  { id: 'i2', organisationId: ORG.NOVA, number: 'WEB/2026-27/0098', clientName: 'Nova Clinics', amount: 82600, due: day(-17), status: 'OVERDUE' },
-  { id: 'i3', organisationId: ORG.NOVA, number: 'WEB/2026-27/0105', clientName: 'Nova Clinics', amount: 35400, due: day(-4), status: 'OVERDUE' },
-];
+/* Invoices moved to data5.ts (Week 5 finance). */
 
 /* --------------------------------------------------------------- approvals */
 

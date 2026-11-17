@@ -24,7 +24,7 @@ export function AdminHome() {
       />
 
       <div className="grid grid--stats">
-        {isOwner && <Stat label="Revenue this month" value={formatINR(data.revenueThisMonth)} hint="Paid invoices" />}
+        {isOwner && <Stat label="Revenue this month" value={formatINR(data.revenueThisMonth)} hint="Invoiced, before GST" />}
         {isOwner && <Stat label="Monthly recurring" value={formatINR(data.recurringRevenue)} hint="Active retainers" />}
         <Stat label="Outstanding" value={formatINR(data.outstanding)} hint={`${data.overdueInvoices.length} invoices overdue`} accent={data.overdueInvoices.length > 0} />
         <Stat label="Overdue tasks" value={data.overdueTasks} hint="Across all teams" accent={data.overdueTasks > 0} />
@@ -103,14 +103,14 @@ export function AdminHome() {
           ) : (
             <table className="table">
               <thead>
-                <tr><th>Client</th><th>Invoice</th><th>Amount</th><th>Status</th></tr>
+                <tr><th>Client</th><th>Invoice</th><th>Balance</th><th>Status</th></tr>
               </thead>
               <tbody>
                 {data.overdueInvoices.map((i) => (
                   <tr key={i.id}>
                     <td data-label="Client"><strong>{i.clientName}</strong></td>
-                    <td data-label="Invoice">{i.number}<div className="list__meta">{dueLabel(i.due)}</div></td>
-                    <td data-label="Amount">{formatINR(i.amount)}</td>
+                    <td data-label="Invoice">{isOwner ? <Link to={`/admin/finance/invoices/${i.id}`}>{i.number}</Link> : i.number}<div className="list__meta">{dueLabel(i.due)}</div></td>
+                    <td data-label="Balance">{formatINR(i.amount)}</td>
                     <td data-label="Status"><InvoiceBadge status={i.status} /></td>
                   </tr>
                 ))}

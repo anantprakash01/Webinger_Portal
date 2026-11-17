@@ -11,6 +11,12 @@ import { ForgotPasswordPage } from '@/pages/auth/ForgotPassword';
 import { ResetPasswordPage } from '@/pages/auth/ResetPassword';
 import { AdminClientDetail } from '@/pages/admin/AdminClientDetail';
 import { AdminClients } from '@/pages/admin/AdminClients';
+import { AdminFinance } from '@/pages/admin/AdminFinance';
+import { AdminInvoice } from '@/pages/admin/AdminInvoice';
+import { AdminReports } from '@/pages/admin/AdminReports';
+import { ClientBilling } from '@/pages/client/ClientBilling';
+import { ClientInvoice } from '@/pages/client/ClientInvoice';
+import { ClientReports } from '@/pages/client/ClientReports';
 import { AdminSettings } from '@/pages/admin/AdminSettings';
 import { ClientApprovalDetail } from '@/pages/client/ClientApprovalDetail';
 import { ClientApprovals } from '@/pages/client/ClientApprovals';
@@ -52,17 +58,26 @@ const PAGES = {
   '/client/messages': MessagesPage,
   '/employee/messages': MessagesPage,
   '/client/files': ClientFiles,
+  '/admin/finance': AdminFinance,
+  '/admin/reports': AdminReports,
+  '/client/billing': ClientBilling,
+  '/client/reports': ClientReports,
 };
 
-/** Detail routes that have no nav item of their own. Paths are relative to the area. */
+/**
+ * Detail routes that have no nav item of their own. Paths are relative to the area.
+ * `guard` names the nav item whose role/permission rule also applies (e.g. invoices follow Billing).
+ */
 const DETAIL_ROUTES = {
   admin: [
     { path: 'projects/:id', Page: AdminProjectDetail },
     { path: 'clients/:id', Page: AdminClientDetail },
+    { path: 'finance/invoices/:id', Page: AdminInvoice, guard: '/admin/finance' },
   ],
   client: [
     { path: 'projects/:id', Page: ClientProjectDetail },
     { path: 'approvals/:id', Page: ClientApprovalDetail },
+    { path: 'billing/invoices/:id', Page: ClientInvoice, guard: '/client/billing' },
   ],
 };
 
@@ -104,9 +119,10 @@ export default function App() {
                       const Page = PAGES[i.to] ?? Placeholder;
                       return <Route key={i.to} path={i.to.slice(area.length + 2)} element={<Guarded item={i} Page={Page} />} />;
                     })}
-                  {(DETAIL_ROUTES[area] ?? []).map(({ path, Page }) => (
-                    <Route key={path} path={path} element={<Page />} />
-                  ))}
+                  {(DETAIL_ROUTES[area] ?? []).map(({ path, Page, guard }) => {
+                    const item = guard && NAV[area].find((i) => i.to === guard);
+                    return <Route key={path} path={path} element={item ? <Guarded item={item} Page={Page} /> : <Page />} />;
+                  })}
                   <Route path="*" element={<NotFound />} />
                 </Route>
               </Route>

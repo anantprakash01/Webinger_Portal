@@ -20,7 +20,8 @@ import type {
   User,
 } from '@/types';
 import { sendInvite, validateNew } from './accounts';
-import { ago, approvals, CLIENT_NAME, day, invoices, nameOf, ORG, organisations, projects, tasks, userById, users } from './data';
+import { ago, approvals, CLIENT_NAME, day, nameOf, ORG, organisations, projects, tasks, userById, users } from './data';
+import { balanceOf, daysLateOf, unpaidInvoices } from './finance';
 import type { UserRow } from './data';
 import { badRequest, conflict, forbidden, isAdminArea, isStaff, notFound, permissionsOf, toListItem } from './handlers';
 
@@ -113,7 +114,7 @@ export const clientRows: ClientRow[] = [
     history: [
       ev('h-n1', 24 * 210, 'Rohan Mehta', 'CREATED', 'Client created from a referral by Terra Foods'),
       ev('h-n2', 24 * 150, 'Rohan Mehta', 'CONTRACT', 'Signed lead generation retainer, ₹70,000 a month'),
-      ev('h-n3', 24 * 17, 'System', 'INVOICE', 'Invoice WEB/2026-27/0098 is overdue'),
+      ev('h-n3', 24 * 17, 'System', 'INVOICE', 'October retainer invoice is overdue'),
       ev('h-n4', 24 * 3, 'Kavya Iyer', 'NOTE', 'Sameer unhappy with hero banner rounds. Offered a call with the designer.'),
     ],
   },
@@ -175,7 +176,7 @@ const DAY_MS = 86_400_000;
 const daysSince = (iso: string) => Math.floor((Date.now() - Date.parse(iso)) / DAY_MS);
 const today = () => day(0);
 
-function contractStatus(c: ClientContract): ClientContract['status'] {
+export function contractStatus(c: ClientContract): ClientContract['status'] {
   if (c.endDate < today()) return 'ENDED';
   if (c.endDate <= day(30)) return 'ENDING_SOON'; // automation rule 15: renewal 30 days before the end
   return 'ACTIVE';
@@ -201,8 +202,7 @@ export function healthOf(row: ClientRow): { health: Health; score: number; facto
     (a) => a.organisationId === orgId && a.status === 'PENDING' && daysSince(a.versions[a.versions.length - 1].submittedAt) > 5,
   ).length;
   const missed = live.flatMap((p) => p.milestones.filter((m) => !m.completedAt && m.due < now)).length;
-  const unpaid = invoices.filter((i) => i.organisationId === orgId && (i.status === 'OVERDUE' || (i.status === 'SENT' && i.due < now)));
-  const worstLate = unpaid.reduce((n, i) => Math.max(n, -Math.round((Date.parse(i.due) - Date.parse(now)) / DAY_MS)), 0);
+  const worstLate = unpaidInvoices(orgId).reduce((n, i) => Math.max(n, daysLateOf(i)), 0);
   const sat = row.satisfaction;
 
   const factors: HealthFactor[] = [
@@ -251,7 +251,7 @@ function toItem(row: ClientRow): ClientListItem {
     health,
     healthScore: score,
     monthlyRetainer: running.filter((c) => c.kind === 'RETAINER').reduce((s, c) => s + c.value, 0),
-    outstanding: invoices.filter((i) => i.organisationId === orgId && i.status !== 'PAID' && i.status !== 'CANCELLED').reduce((s, i) => s + i.amount, 0),
+    outstanding: unpaidInvoices(orgId).reduce((s, i) => s + balanceOf(i), 0),
     renewalDue: running.map((c) => c.endDate).sort()[0],
   };
 }
