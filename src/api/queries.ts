@@ -20,6 +20,9 @@ import type {
   ApprovalStatus,
   ChatMessage,
   ClientTeam,
+  ClientPatch,
+  ClientQuery,
+  NewClient,
   Conversation,
   NewMessage,
   NewTicket,
@@ -31,6 +34,16 @@ import type {
   RepPatch,
   ReviewInput,
   UserInvite,
+} from '@/types';
+import type {
+  ExportKind,
+  InvoiceStatus,
+  NewExpense,
+  NewInvoice,
+  NewQuote,
+  PaymentInput,
+  QuoteStatus,
+  ReportInput,
 } from '@/types';
 import type { Area, NewComment, ProjectQuery, TaskDetail, TaskItem, TaskPatch, TaskQuery } from '@/types';
 import { api } from './client';
@@ -260,6 +273,30 @@ export function useSaveSettings() {
 export const useDemoOutbox = (to?: string, enabled = true) =>
   useQuery({ queryKey: ['demo', 'outbox', to ?? 'all'], queryFn: () => api.demo.outbox(to), enabled, staleTime: 0 });
 
+/* ---------- Admin: clients ---------- */
+
+export const useClients = (q: ClientQuery) =>
+  useQuery({ queryKey: ['clients', 'list', q], queryFn: () => api.clients.list(q), placeholderData: keepPreviousData });
+export const useClient = (id: string) => useQuery({ queryKey: ['clients', 'detail', id], queryFn: () => api.clients.get(id) });
+export const useAccountManagers = () => useQuery({ queryKey: ['clients', 'managers'], queryFn: api.clients.managers, staleTime: 5 * 60_000 });
+
+/** Create, edit and note mutations all return the fresh client; the list (health, manager) is refetched. */
+export function useClientMutation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (
+      m: { kind: 'create'; body: NewClient } | { kind: 'update'; id: string; patch: ClientPatch } | { kind: 'note'; id: string; text: string },
+    ) => (m.kind === 'create' ? api.clients.create(m.body) : m.kind === 'update' ? api.clients.update(m.id, m.patch) : api.clients.addNote(m.id, m.text)),
+    onSuccess: (c) => {
+      qc.setQueryData(['clients', 'detail', c.id], c);
+      void qc.invalidateQueries({ queryKey: ['clients', 'list'] });
+      // A new client also adds an organisation and a user account; a new manager changes the client's dashboard.
+      void qc.invalidateQueries({ queryKey: ['admin'] });
+      void qc.invalidateQueries({ queryKey: ['demo'] });
+    },
+  });
+}
+
 /* ---------- Week 4: messages, tickets, files ---------- */
 
 export function useConversations() {
@@ -346,3 +383,100 @@ export const useAvailability = () => useQuery({ queryKey: ['availability'], quer
 
 export const useFiles = () => useQuery({ queryKey: ['files'], queryFn: () => api.files.list() });
 export const useFile = (id: string | null) => useQuery({ queryKey: ['files', id], queryFn: () => api.files.get(id!), enabled: !!id });
+
+/* ---------- Week 5: finance, billing, reports ---------- */
+
+export const useFinanceSummary = () => useQuery({ queryKey: ['finance', 'summary'], queryFn: api.finance.summary });
+export const useInvoices = (q: { status?: InvoiceStatus; clientId?: string; q?: string }) =>
+  useQuery({ queryKey: ['finance', 'invoices', q], queryFn: () => api.finance.invoices(q), placeholderData: keepPreviousData });
+export const useInvoice = (id: string | null) =>
+  useQuery({ queryKey: ['finance', 'invoice', id], queryFn: () => api.finance.invoice(id!), enabled: !!id });
+export const useQuotes = (q: { status?: QuoteStatus; clientId?: string } = {}) =>
+  useQuery({ queryKey: ['finance', 'quotes', q], queryFn: () => api.finance.quotes(q) });
+export const useQuote = (id: string | null) => useQuery({ queryKey: ['finance', 'quote', id], queryFn: () => api.finance.quote(id!), enabled: !!id });
+export const usePayments = () => useQuery({ queryKey: ['finance', 'payments'], queryFn: () => api.finance.payments() });
+export const useExpenses = (q: { month?: string; category?: string } = {}) =>
+  useQuery({ queryKey: ['finance', 'expenses', q], queryFn: () => api.finance.expenses(q), placeholderData: keepPreviousData });
+export const useProfit = () => useQuery({ queryKey: ['finance', 'profit'], queryFn: api.finance.profit });
+export const useExportLog = () => useQuery({ queryKey: ['finance', 'exports'], queryFn: api.finance.exports });
+export const useBillableProjects = (clientId: string | undefined) =>
+  useQuery({ queryKey: ['finance', 'projects', clientId], queryFn: () => api.finance.projects(clientId!), enabled: !!clientId, staleTime: 60_000 });
+
+type FinanceAction =
+  | { kind: 'createInvoice'; body: NewInvoice }
+  | { kind: 'updateInvoice'; id: string; body: Partial<NewInvoice> }
+  | { kind: 'send'; id: string }
+  | { kind: 'remind'; id: string }
+  | { kind: 'cancel'; id: string; reason: string }
+  | { kind: 'payment'; id: string; body: PaymentInput }
+  | { kind: 'createQuote'; body: NewQuote }
+  | { kind: 'sendQuote'; id: string }
+  | { kind: 'expense'; body: NewExpense }
+  | { kind: 'export'; type: ExportKind; from: string; to: string };
+
+/** Every finance write. Money changes ripple into clients (outstanding, health), dashboards and the demo inbox. */
+export function useFinanceAction() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (a: FinanceAction): Promise<any> => {
+      switch (a.kind) {
+        case 'createInvoice': return api.finance.createInvoice(a.body);
+        case 'updateInvoice': return api.finance.updateInvoice(a.id, a.body);
+        case 'send': return api.finance.sendInvoice(a.id);
+        case 'remind': return api.finance.remind(a.id);
+        case 'cancel': return api.finance.cancel(a.id, a.reason);
+        case 'payment': return api.finance.recordPayment(a.id, a.body);
+        case 'createQuote': return api.finance.createQuote(a.body);
+        case 'sendQuote': return api.finance.sendQuote(a.id);
+        case 'expense': return api.finance.createExpense(a.body);
+        case 'export': return api.finance.exportFile(a.type, a.from, a.to);
+      }
+    },
+    onSuccess: (_d, a) => {
+      void qc.invalidateQueries({ queryKey: ['finance'] });
+      if (a.kind !== 'export') {
+        void qc.invalidateQueries({ queryKey: ['clients'] });
+        void qc.invalidateQueries({ queryKey: ['dashboard'] });
+        void qc.invalidateQueries({ queryKey: ['demo'] });
+      }
+    },
+  });
+}
+
+export const useBilling = () => useQuery({ queryKey: ['billing'], queryFn: api.billing.overview });
+export const useBillingInvoice = (id: string) => useQuery({ queryKey: ['billing', 'invoice', id], queryFn: () => api.billing.invoice(id) });
+export const useBillingQuote = (id: string | null) =>
+  useQuery({ queryKey: ['billing', 'quote', id], queryFn: () => api.billing.quote(id!), enabled: !!id });
+
+export function useBillingAction() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (a: { kind: 'pay'; id: string } | { kind: 'accept'; id: string } | { kind: 'decline'; id: string; reason: string }): Promise<any> =>
+      a.kind === 'pay' ? api.billing.pay(a.id) : a.kind === 'accept' ? api.billing.accept(a.id) : api.billing.decline(a.id, a.reason),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['billing'] });
+      void qc.invalidateQueries({ queryKey: ['dashboard'] });
+      void qc.invalidateQueries({ queryKey: ['demo'] });
+    },
+  });
+}
+
+export const useMyReport = (month?: string) =>
+  useQuery({ queryKey: ['reports', 'mine', month ?? 'latest'], queryFn: () => api.reports.mine(month), placeholderData: keepPreviousData });
+export const useReportStatuses = (month?: string) =>
+  useQuery({ queryKey: ['reports', 'statuses', month], queryFn: () => api.reports.statuses(month), placeholderData: keepPreviousData });
+export const useAdminReport = (clientId: string | null, month: string) =>
+  useQuery({ queryKey: ['reports', 'admin', clientId, month], queryFn: () => api.reports.get(clientId!, month), enabled: !!clientId });
+
+export function useReportAction() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (a: { kind: 'save'; clientId: string; month: string; body: ReportInput } | { kind: 'publish'; clientId: string; month: string }) =>
+      a.kind === 'save' ? api.reports.save(a.clientId, a.month, a.body) : api.reports.publish(a.clientId, a.month),
+    onSuccess: (r) => {
+      qc.setQueryData(['reports', 'admin', r.clientId, r.month], r);
+      void qc.invalidateQueries({ queryKey: ['reports', 'statuses'] });
+      void qc.invalidateQueries({ queryKey: ['demo'] });
+    },
+  });
+}

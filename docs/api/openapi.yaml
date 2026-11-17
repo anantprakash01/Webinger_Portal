@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Webinger Portal API
-  version: 0.4.0
+  version: 0.5.0
   description: |
     Contract between the React frontend and the Spring Boot backend.
     Week 1 covers sign-in and one dashboard per portal area.
@@ -9,6 +9,9 @@ info:
     Week 3 adds approvals, internal review, the client team, user admin, settings and the auth flows.
     Week 4 adds messages, tickets, uploads and files. Live updates: Phase 0 polls GET .../messages;
     Phase 1 adds Spring WebSocket (STOMP) topics /topic/conversations/{id} and /user/queue/inbox with the same payloads.
+    0.5.0 adds finance (invoices with GST, quotes, payments with TDS, expenses, profit, CA export),
+    client billing (pay, accept or decline quotes) and monthly client reports.
+    0.4.1 adds the admin clients module (list, detail with health score, create, edit, notes).
     Every endpoint below is served by src/api/mock in Phase 0 and by Spring Boot from Phase 1.
 
     Access rules the backend must enforce on every call:
@@ -25,6 +28,17 @@ info:
         are never returned to client roles; clients cannot write internal notes
       - files: clients see their own company's CLIENT-visible vault files and deliverables of
         projects they can see; download links are signed and expire after 5 minutes
+      - finance: /finance/* is SUPER_ADMIN only. Invoices are numbered only when sent (WEB/yyyy-yy/nnnn,
+        no gaps), never deleted (cancelled with a reason; paid ones need a credit note). OVERDUE is derived.
+        GST 18%: CGST+SGST when the place of supply is the agency's state (27), IGST otherwise.
+      - billing: /billing/* needs a client role plus BILLING_VIEW, own organisation only; drafts and other
+        companies' invoices are 404. Only CLIENT_OWNER accepts or declines quotes. Accepting adds a contract
+        and drafts the advance invoice (sent by a Super Admin). Online payment is confirmed only by the
+        payment gateway's signed webhook (Phase 2).
+      - reports: /admin/reports is SUPER_ADMIN and MANAGER; /reports returns PUBLISHED months of the caller's
+        organisation only, and reps only see services of projects they belong to.
+      - clients: /clients is SUPER_ADMIN and MANAGER only; creating a client (it issues a login)
+        and changing a client's status are SUPER_ADMIN only; lifetimeValue is never sent to managers
 servers:
   - url: /api/v1
 security:
@@ -914,6 +928,620 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
 
+  /clients:
+    get:
+      tags: [clients]
+      summary: Client companies. SUPER_ADMIN and MANAGER.
+      description: |
+        Order: live clients first, then red, amber, green, then lowest score.
+        Phase 1: a manager sees only clients of their teams.
+      parameters:
+        - { name: q, in: query, schema: { type: string }, description: Name, industry, city or account manager }
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/ClientStatus' } }
+        - { name: health, in: query, schema: { $ref: '#/components/schemas/Health' } }
+        - { name: accountManagerId, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/ClientListItem' } }
+        '403': { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [clients]
+      summary: Add a client and invite its owner. SUPER_ADMIN only.
+      description: |
+        One transaction: organisation (kind CLIENT), client profile (status ONBOARDING), CLIENT_OWNER account (INVITED)
+        and a 7-day invite email. 409 when the company name or the owner's email already exists.
+        Phase 2: a won deal in the pipeline calls the same service.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NewClient' }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientDetail' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /clients/account-managers:
+    get:
+      tags: [clients]
+      summary: Active agency staff who can be account manager or backup
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { type: object, properties: { id: { type: string }, name: { type: string }, title: { type: string } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+  /clients/{id}:
+    get:
+      tags: [clients]
+      summary: Client record with health factors, contacts, contracts, projects and history
+      description: |
+        Health rule (same as project health): AMBER when a task on a live project is overdue or an approval
+        waits more than 5 days; RED when a milestone is missed, an invoice is 15+ days late or satisfaction <= 2.
+        healthScore = 100 minus the factor penalties; it ranks clients but never overrides the level.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string }, description: The client's organisationId }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientDetail' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+    patch:
+      tags: [clients]
+      summary: Edit profile, account manager or status
+      description: |
+        Admin area. Changing status is SUPER_ADMIN only (403 for managers). Account manager and backup must be
+        active agency staff and different people. Every change is written to the client's history.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string }, description: The client's organisationId }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ClientPatch' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientDetail' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /clients/{id}/notes:
+    post:
+      tags: [clients]
+      summary: Add an internal note to the client history
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string }, description: The client's organisationId }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [text], properties: { text: { type: string, minLength: 2, maxLength: 2000 } } }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientDetail' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /finance/summary:
+    get:
+      tags: [finance]
+      summary: 'Money overview: collected, recurring, outstanding, days to collect, 6 months, by service'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FinanceSummary' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /finance/invoices:
+    get:
+      tags: [finance]
+      summary: 'Invoices (drafts first, then overdue)'
+      parameters:
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/InvoiceStatus' } }
+        - { name: clientId, in: query, schema: { type: string } }
+        - { name: q, in: query, schema: { type: string }, description: 'Number, client or title' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/InvoiceListItem' } }
+        '403': { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [finance]
+      summary: 'Create a draft invoice (no number yet)'
+      description: |
+        Lines must point at projects of the same client. Place of supply comes from the client's GSTIN, else its city.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NewInvoice' }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvoiceDetail' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /finance/invoices/{id}:
+    get:
+      tags: [finance]
+      summary: 'Invoice with lines, GST split, payments and event trail'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvoiceDetail' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+    patch:
+      tags: [finance]
+      summary: 'Edit a draft'
+      description: |
+        409 once sent: a sent invoice is a tax document. Cancel it and raise a new one.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NewInvoice' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvoiceDetail' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /finance/invoices/{id}/send:
+    post:
+      tags: [finance]
+      summary: 'Give the next number and email the billing contacts'
+      description: |
+        The number is taken from a per-financial-year counter in the same transaction (row lock), so there are no gaps.
+        409 when already sent or nobody at the client can receive it.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvoiceDetail' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /finance/invoices/{id}/remind:
+    post:
+      tags: [finance]
+      summary: 'Email a payment reminder (once a day)'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvoiceDetail' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /finance/invoices/{id}/cancel:
+    post:
+      tags: [finance]
+      summary: 'Cancel with a reason (kept on record)'
+      description: |
+        409 when money has been received: issue a credit note instead (Phase 1).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [reason], properties: { reason: { type: string, minLength: 3 } } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvoiceDetail' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /finance/invoices/{id}/payments:
+    post:
+      tags: [finance]
+      summary: 'Record money received (bank, UPI, cheque, card) with optional TDS'
+      description: |
+        amount + tds may not exceed the balance; TDS at most 10% of the taxable value; date not in the future.
+        The invoice becomes PAID when the balance reaches zero. A receipt (RCPT/yyyy-yy/nnnn) is emailed.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PaymentInput' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvoiceDetail' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /finance/quotes:
+    get:
+      tags: [finance]
+      summary: 'Quotes'
+      parameters:
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/QuoteStatus' } }
+        - { name: clientId, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/QuoteListItem' } }
+        '403': { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [finance]
+      summary: 'Create a draft quote'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NewQuote' }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QuoteDetail' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /finance/quotes/{id}:
+    get:
+      tags: [finance]
+      summary: 'Quote with lines and event trail'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QuoteDetail' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /finance/quotes/{id}/send:
+    post:
+      tags: [finance]
+      summary: 'Send to the client owner'
+      description: |
+        409 when the client has no active owner login (only the owner can accept) or the quote has expired.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QuoteDetail' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /finance/payments:
+    get:
+      tags: [finance]
+      summary: 'Payments received, newest first'
+      parameters:
+        - { name: clientId, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/PaymentItem' } }
+        '403': { $ref: '#/components/responses/Problem' }
+  /finance/expenses:
+    get:
+      tags: [finance]
+      summary: 'Expenses'
+      parameters:
+        - { name: month, in: query, schema: { type: string }, description: 'yyyy-mm' }
+        - { name: category, in: query, schema: { $ref: '#/components/schemas/ExpenseCategory' } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/ExpenseItem' } }
+        '403': { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [finance]
+      summary: 'Record an expense, optionally charged to a project'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NewExpense' }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExpenseItem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /finance/profit:
+    get:
+      tags: [finance]
+      summary: 'Margin per client and per project'
+      description: |
+        Margin = invoiced before GST - hours x cost rate - direct costs. Cost rates never leave the server.
+        Phase 2: hours per person from time entries.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProfitReport' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /finance/projects:
+    get:
+      tags: [finance]
+      summary: 'A client''s billable projects (for invoice lines)'
+      parameters:
+        - { name: clientId, in: query, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { type: object, properties: { id: { type: string }, name: { type: string }, service: { type: string } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+  /finance/export:
+    get:
+      tags: [finance]
+      summary: 'CSV for the accountant (invoices, payments or expenses)'
+      description: |
+        At most one year per export. Every export is written to the export log (who, what, range, rows).
+      parameters:
+        - { name: kind, in: query, required: true, schema: { type: string, enum: [invoices, payments, expenses] } }
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExportFile' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /finance/exports:
+    get:
+      tags: [finance]
+      summary: 'Export log, newest first'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/ExportLogItem' } }
+        '403': { $ref: '#/components/responses/Problem' }
+  /billing:
+    get:
+      tags: [billing]
+      summary: 'The client''s invoices, quotes, contracts and receipts'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BillingOverview' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /billing/invoices/{id}:
+    get:
+      tags: [billing]
+      summary: 'One invoice (no internal event trail)'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvoiceDetail' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /billing/invoices/{id}/pay:
+    post:
+      tags: [billing]
+      summary: 'Pay the balance online'
+      description: |
+        Phase 0 demo marks it paid. Phase 2: returns a payment-gateway order; the invoice is marked paid only from
+        the gateway's signed webhook, never by the browser.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvoiceDetail' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /billing/quotes/{id}:
+    get:
+      tags: [billing]
+      summary: 'One quote'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QuoteDetail' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /billing/quotes/{id}/accept:
+    post:
+      tags: [billing]
+      summary: 'Accept (CLIENT_OWNER only)'
+      description: |
+        One transaction: quote ACCEPTED, contract added to the client record, advance invoice drafted (automation rule 2).
+        409 when expired or already decided.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QuoteDetail' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /billing/quotes/{id}/decline:
+    post:
+      tags: [billing]
+      summary: 'Decline with a reason (CLIENT_OWNER only)'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [reason], properties: { reason: { type: string, minLength: 3 } } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QuoteDetail' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /reports:
+    get:
+      tags: [reports]
+      summary: 'The caller''s published monthly report (latest when no month)'
+      parameters:
+        - { name: month, in: query, schema: { type: string, pattern: '^\d{4}-\d{2}$' } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientReport' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /admin/reports:
+    get:
+      tags: [reports]
+      summary: 'Where each live client''s report stands for a month (default: last month)'
+      parameters:
+        - { name: month, in: query, schema: { type: string, pattern: '^\d{4}-\d{2}$' } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/ReportStatusItem' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /admin/reports/{clientId}/{month}:
+    get:
+      tags: [reports]
+      summary: 'One report for editing (empty skeleton if not started)'
+      parameters:
+        - { name: clientId, in: path, required: true, schema: { type: string } }
+        - { name: month, in: path, required: true, schema: { type: string, pattern: '^\d{4}-\d{2}$' } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientReport' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+    put:
+      tags: [reports]
+      summary: 'Save numbers (draft, or a correction to a published month)'
+      description: |
+        Values are numbers >= 0, percentages <= 100, null = not entered. Only services the client buys.
+      parameters:
+        - { name: clientId, in: path, required: true, schema: { type: string } }
+        - { name: month, in: path, required: true, schema: { type: string, pattern: '^\d{4}-\d{2}$' } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReportInput' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientReport' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /admin/reports/{clientId}/{month}/publish:
+    post:
+      tags: [reports]
+      summary: 'Publish to the client and email them'
+      description: |
+        400 lists every missing number (automation rule 11 turns these into tasks). Needs a summary; not for the current month.
+      parameters:
+        - { name: clientId, in: path, required: true, schema: { type: string } }
+        - { name: month, in: path, required: true, schema: { type: string, pattern: '^\d{4}-\d{2}$' } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClientReport' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
 components:
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
@@ -1706,3 +2334,438 @@ components:
         url: { type: string }
         fileName: { type: string }
         expiresAt: { type: string, format: date-time }
+
+    # ---------- Admin: clients (0.4.1) ----------
+    ClientStatus: { type: string, enum: [ONBOARDING, ACTIVE, PAUSED, ENDED] }
+    ClientListItem:
+      type: object
+      required: [id, name, industry, city, status, clientSince, accountManager, activeProjects, totalProjects, services, health, healthScore, monthlyRetainer, outstanding]
+      properties:
+        id: { type: string, description: organisationId }
+        name: { type: string }
+        industry: { type: string }
+        city: { type: string }
+        status: { $ref: '#/components/schemas/ClientStatus' }
+        clientSince: { type: string, format: date }
+        accountManager: { type: object, properties: { id: { type: string }, name: { type: string } } }
+        activeProjects: { type: integer }
+        totalProjects: { type: integer }
+        services: { type: array, items: { type: string } }
+        health: { $ref: '#/components/schemas/Health' }
+        healthScore: { type: integer, minimum: 0, maximum: 100 }
+        monthlyRetainer: { type: number, description: Running retainer contracts, INR before GST }
+        outstanding: { type: number, description: Unpaid invoices, INR }
+        renewalDue: { type: string, format: date, description: Earliest end date of a running contract }
+    HealthFactor:
+      type: object
+      required: [key, label, level, detail, penalty]
+      properties:
+        key: { type: string, enum: [OVERDUE_TASKS, SLOW_APPROVALS, MISSED_MILESTONES, LATE_INVOICE, SATISFACTION] }
+        label: { type: string }
+        level: { type: string, enum: [OK, AMBER, RED] }
+        detail: { type: string }
+        penalty: { type: integer }
+    ClientContact:
+      type: object
+      required: [id, name, email, role, status, canSeeBilling]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        title: { type: string }
+        email: { type: string }
+        role: { type: string, enum: [CLIENT_OWNER, CLIENT_REP] }
+        status: { $ref: '#/components/schemas/AccountStatus' }
+        lastLoginAt: { type: string, format: date-time }
+        canSeeBilling: { type: boolean }
+    ClientContract:
+      type: object
+      required: [id, title, kind, startDate, endDate, value, revisionsPerDeliverable, status]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        kind: { type: string, enum: [RETAINER, PROJECT] }
+        startDate: { type: string, format: date }
+        endDate: { type: string, format: date }
+        value: { type: number, description: Monthly for retainers, total for projects; INR before GST }
+        revisionsPerDeliverable: { type: integer }
+        status: { type: string, enum: [ACTIVE, ENDING_SOON, ENDED], description: ENDING_SOON within 30 days of endDate }
+    ClientHistoryItem:
+      type: object
+      required: [id, at, actor, kind, text]
+      properties:
+        id: { type: string }
+        at: { type: string, format: date-time }
+        actor: { type: string }
+        kind: { type: string, enum: [CREATED, CONTRACT, PROJECT, INVOICE, APPROVAL, NOTE, STATUS, CHANGE] }
+        text: { type: string }
+    ClientDetail:
+      allOf:
+        - $ref: '#/components/schemas/ClientListItem'
+        - type: object
+          required: [legalName, address, healthFactors, contacts, contracts, projects, history]
+          properties:
+            legalName: { type: string }
+            gstin: { type: string, pattern: '^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$' }
+            website: { type: string }
+            address: { type: string }
+            backupManager: { type: object, properties: { id: { type: string }, name: { type: string } } }
+            satisfaction: { type: number, description: Average milestone rating 1-5 }
+            approvalDays: { type: number, description: Average days from sent-for-approval to decision }
+            healthFactors: { type: array, items: { $ref: '#/components/schemas/HealthFactor' } }
+            contacts: { type: array, items: { $ref: '#/components/schemas/ClientContact' } }
+            contracts: { type: array, items: { $ref: '#/components/schemas/ClientContract' } }
+            projects: { type: array, items: { $ref: '#/components/schemas/ProjectListItem' } }
+            history: { type: array, items: { $ref: '#/components/schemas/ClientHistoryItem' }, description: Newest first }
+            lifetimeValue: { type: number, description: SUPER_ADMIN only; never sent to managers }
+    NewClient:
+      type: object
+      required: [name, legalName, industry, city, accountManagerId, owner]
+      properties:
+        name: { type: string, minLength: 2 }
+        legalName: { type: string }
+        industry: { type: string }
+        city: { type: string }
+        gstin: { type: string }
+        website: { type: string }
+        accountManagerId: { type: string }
+        owner:
+          type: object
+          required: [name, email]
+          properties:
+            name: { type: string }
+            email: { type: string, format: email }
+            title: { type: string }
+    ClientPatch:
+      type: object
+      minProperties: 1
+      properties:
+        industry: { type: string }
+        city: { type: string }
+        gstin: { type: string, description: Empty string clears it }
+        website: { type: string }
+        address: { type: string }
+        accountManagerId: { type: string }
+        backupManagerId: { type: string, description: Empty string removes the backup }
+        status: { $ref: '#/components/schemas/ClientStatus' }
+
+    # ---------- Finance, billing, reports (0.5.0) ----------
+    QuoteStatus: { type: string, enum: [DRAFT, SENT, ACCEPTED, DECLINED, EXPIRED], description: EXPIRED is derived (SENT past validUntil) }
+    PaymentMethod: { type: string, enum: [BANK_TRANSFER, UPI, CHEQUE, CARD, ONLINE] }
+    ExpenseCategory: { type: string, enum: [FREELANCER, PRODUCTION, SOFTWARE, MEDIA, TRAVEL, OFFICE] }
+    Party:
+      type: object
+      required: [name, legalName, address, stateCode, stateName]
+      properties:
+        name: { type: string }
+        legalName: { type: string }
+        gstin: { type: string }
+        address: { type: string }
+        stateCode: { type: string, description: GST state code, e.g. 27 }
+        stateName: { type: string }
+    LineItemInput:
+      type: object
+      required: [description, quantity, rate]
+      properties:
+        description: { type: string, minLength: 2 }
+        sac: { type: string, pattern: '^\d{6}$', description: Defaults to 998361 }
+        quantity: { type: number, exclusiveMinimum: 0, maximum: 1000 }
+        rate: { type: number, exclusiveMinimum: 0, description: INR before GST }
+        projectId: { type: string }
+    LineItem:
+      allOf:
+        - $ref: '#/components/schemas/LineItemInput'
+        - type: object
+          required: [amount]
+          properties:
+            projectName: { type: string }
+            amount: { type: number }
+    TaxLine:
+      type: object
+      required: [label, rate, amount]
+      properties:
+        label: { type: string, enum: [CGST, SGST, IGST] }
+        rate: { type: number }
+        amount: { type: number }
+    InvoiceListItem:
+      type: object
+      required: [id, clientId, clientName, title, due, status, subtotal, tax, total, paid, balance]
+      properties:
+        id: { type: string }
+        number: { type: string, description: Given when sent }
+        clientId: { type: string }
+        clientName: { type: string }
+        title: { type: string }
+        issueDate: { type: string, format: date }
+        due: { type: string, format: date }
+        status: { $ref: '#/components/schemas/InvoiceStatus' }
+        subtotal: { type: number }
+        tax: { type: number }
+        total: { type: number }
+        paid: { type: number, description: Payments plus TDS }
+        balance: { type: number }
+        daysLate: { type: integer }
+    InvoicePayment:
+      type: object
+      required: [id, receiptNumber, date, amount, tds, method, recordedBy]
+      properties:
+        id: { type: string }
+        receiptNumber: { type: string }
+        date: { type: string, format: date }
+        amount: { type: number }
+        tds: { type: number }
+        method: { $ref: '#/components/schemas/PaymentMethod' }
+        reference: { type: string }
+        recordedBy: { type: string }
+    FinanceEvent:
+      type: object
+      required: [id, at, actor, text]
+      properties:
+        id: { type: string }
+        at: { type: string, format: date-time }
+        actor: { type: string }
+        text: { type: string }
+    InvoiceDetail:
+      allOf:
+        - $ref: '#/components/schemas/InvoiceListItem'
+        - type: object
+          required: [seller, buyer, placeOfSupply, items, taxes, amountInWords, payments, payTo]
+          properties:
+            seller: { $ref: '#/components/schemas/Party' }
+            buyer: { $ref: '#/components/schemas/Party' }
+            placeOfSupply: { type: string }
+            items: { type: array, items: { $ref: '#/components/schemas/LineItem' } }
+            taxes: { type: array, items: { $ref: '#/components/schemas/TaxLine' } }
+            amountInWords: { type: string }
+            notes: { type: string }
+            payments: { type: array, items: { $ref: '#/components/schemas/InvoicePayment' } }
+            cancelReason: { type: string }
+            events: { type: array, items: { $ref: '#/components/schemas/FinanceEvent' }, description: Staff only }
+            payTo: { type: object, properties: { bank: { type: string }, account: { type: string }, ifsc: { type: string }, upi: { type: string } } }
+    NewInvoice:
+      type: object
+      required: [clientId, title, due, items]
+      properties:
+        clientId: { type: string }
+        title: { type: string, minLength: 3 }
+        due: { type: string, format: date }
+        items: { type: array, minItems: 1, maxItems: 20, items: { $ref: '#/components/schemas/LineItemInput' } }
+        notes: { type: string }
+    PaymentInput:
+      type: object
+      required: [date, amount, method]
+      properties:
+        date: { type: string, format: date }
+        amount: { type: number, exclusiveMinimum: 0 }
+        tds: { type: number, minimum: 0 }
+        method: { $ref: '#/components/schemas/PaymentMethod' }
+        reference: { type: string }
+    QuoteListItem:
+      type: object
+      required: [id, number, clientId, clientName, title, kind, subtotal, total, validUntil, status]
+      properties:
+        id: { type: string }
+        number: { type: string }
+        clientId: { type: string }
+        clientName: { type: string }
+        title: { type: string }
+        kind: { type: string, enum: [RETAINER, PROJECT] }
+        subtotal: { type: number, description: Monthly for retainers }
+        total: { type: number }
+        validUntil: { type: string, format: date }
+        status: { $ref: '#/components/schemas/QuoteStatus' }
+        sentAt: { type: string, format: date-time }
+        decidedAt: { type: string, format: date-time }
+        decidedBy: { type: string }
+    QuoteDetail:
+      allOf:
+        - $ref: '#/components/schemas/QuoteListItem'
+        - type: object
+          required: [seller, buyer, items, taxes, revisionsPerDeliverable]
+          properties:
+            seller: { $ref: '#/components/schemas/Party' }
+            buyer: { $ref: '#/components/schemas/Party' }
+            items: { type: array, items: { $ref: '#/components/schemas/LineItem' } }
+            taxes: { type: array, items: { $ref: '#/components/schemas/TaxLine' } }
+            termMonths: { type: integer }
+            revisionsPerDeliverable: { type: integer }
+            notes: { type: string }
+            declineReason: { type: string }
+            contractId: { type: string }
+            advanceInvoiceId: { type: string }
+            events: { type: array, items: { $ref: '#/components/schemas/FinanceEvent' }, description: Staff only }
+    NewQuote:
+      type: object
+      required: [clientId, title, kind, revisionsPerDeliverable, validDays, items]
+      properties:
+        clientId: { type: string }
+        title: { type: string }
+        kind: { type: string, enum: [RETAINER, PROJECT] }
+        termMonths: { type: integer, minimum: 1, maximum: 36 }
+        revisionsPerDeliverable: { type: integer, minimum: 0, maximum: 10 }
+        validDays: { type: integer, minimum: 1, maximum: 90 }
+        items: { type: array, minItems: 1, items: { $ref: '#/components/schemas/LineItemInput' } }
+        notes: { type: string }
+    PaymentItem:
+      allOf:
+        - $ref: '#/components/schemas/InvoicePayment'
+        - type: object
+          required: [invoiceId, invoiceNumber, clientId, clientName]
+          properties:
+            invoiceId: { type: string }
+            invoiceNumber: { type: string }
+            clientId: { type: string }
+            clientName: { type: string }
+    ExpenseItem:
+      type: object
+      required: [id, date, category, vendor, description, amount, gst, recordedBy]
+      properties:
+        id: { type: string }
+        date: { type: string, format: date }
+        category: { $ref: '#/components/schemas/ExpenseCategory' }
+        vendor: { type: string }
+        description: { type: string }
+        amount: { type: number, description: Before GST }
+        gst: { type: number, description: Input GST }
+        projectId: { type: string }
+        projectName: { type: string }
+        clientName: { type: string }
+        recordedBy: { type: string }
+    NewExpense:
+      type: object
+      required: [date, category, vendor, description, amount]
+      properties:
+        date: { type: string, format: date }
+        category: { $ref: '#/components/schemas/ExpenseCategory' }
+        vendor: { type: string }
+        description: { type: string }
+        amount: { type: number, exclusiveMinimum: 0 }
+        gst: { type: number, minimum: 0 }
+        projectId: { type: string }
+    FinanceSummary:
+      type: object
+      required: [collectedThisMonth, invoicedThisMonth, recurringRevenue, outstanding, overdue, overdueCount, expensesThisMonth, draftInvoices, openQuotes, months, byService]
+      properties:
+        collectedThisMonth: { type: number }
+        invoicedThisMonth: { type: number, description: Before GST }
+        recurringRevenue: { type: number }
+        outstanding: { type: number }
+        overdue: { type: number }
+        overdueCount: { type: integer }
+        daysToCollect: { type: integer }
+        expensesThisMonth: { type: number }
+        draftInvoices: { type: integer }
+        openQuotes: { type: object, properties: { count: { type: integer }, value: { type: number } } }
+        winRate: { type: number, minimum: 0, maximum: 1 }
+        months:
+          type: array
+          description: Last 6 months. invoiced incl. GST; collected incl. TDS credit; expenses before GST.
+          items: { type: object, properties: { month: { type: string }, invoiced: { type: number }, collected: { type: number }, expenses: { type: number } } }
+        byService: { type: array, items: { type: object, properties: { service: { type: string }, amount: { type: number } } } }
+    ProfitRow:
+      type: object
+      required: [id, name, revenue, hours, labourCost, directCost, profit]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        clientName: { type: string }
+        service: { type: string }
+        revenue: { type: number }
+        hours: { type: number }
+        labourCost: { type: number }
+        directCost: { type: number }
+        profit: { type: number }
+        margin: { type: number, description: profit / revenue; absent when nothing is invoiced }
+    ProfitReport:
+      type: object
+      required: [clients, projects]
+      properties:
+        clients: { type: array, items: { $ref: '#/components/schemas/ProfitRow' } }
+        projects: { type: array, items: { $ref: '#/components/schemas/ProfitRow' } }
+    ExportFile:
+      type: object
+      required: [fileName, content, rows]
+      properties:
+        fileName: { type: string }
+        content: { type: string, description: CSV text }
+        rows: { type: integer }
+    ExportLogItem:
+      type: object
+      required: [id, at, by, kind, from, to, rows]
+      properties:
+        id: { type: string }
+        at: { type: string, format: date-time }
+        by: { type: string }
+        kind: { type: string, enum: [invoices, payments, expenses] }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        rows: { type: integer }
+    BillingOverview:
+      type: object
+      required: [outstanding, overdue, invoices, quotes, contracts, payments, canAccept]
+      properties:
+        outstanding: { type: number }
+        overdue: { type: number }
+        nextDue: { type: object, properties: { invoiceId: { type: string }, number: { type: string }, due: { type: string, format: date }, balance: { type: number } } }
+        invoices: { type: array, items: { $ref: '#/components/schemas/InvoiceListItem' } }
+        quotes: { type: array, items: { $ref: '#/components/schemas/QuoteListItem' } }
+        contracts: { type: array, items: { $ref: '#/components/schemas/ClientContract' } }
+        payments: { type: array, items: { $ref: '#/components/schemas/PaymentItem' } }
+        canAccept: { type: boolean }
+    MetricValue:
+      type: object
+      required: [key, label, unit]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        unit: { type: string, enum: [NUMBER, PERCENT, INR, SECONDS] }
+        lowerIsBetter: { type: boolean }
+        value: { type: number }
+        previous: { type: number }
+    ReportSection:
+      type: object
+      required: [service, metrics]
+      properties:
+        service: { type: string }
+        highlight: { type: string }
+        metrics: { type: array, items: { $ref: '#/components/schemas/MetricValue' } }
+    ClientReport:
+      type: object
+      required: [clientId, clientName, month, status, summary, sections, months]
+      properties:
+        clientId: { type: string }
+        clientName: { type: string }
+        month: { type: string, description: yyyy-mm; empty when nothing is published yet }
+        status: { type: string, enum: [DRAFT, PUBLISHED, NOT_STARTED] }
+        summary: { type: string }
+        sections: { type: array, items: { $ref: '#/components/schemas/ReportSection' } }
+        publishedAt: { type: string, format: date-time }
+        publishedBy: { type: string }
+        updatedAt: { type: string, format: date-time, description: Staff only }
+        updatedBy: { type: string, description: Staff only }
+        months: { type: array, items: { type: string }, description: Published months, newest first }
+    ReportStatusItem:
+      type: object
+      required: [clientId, clientName, month, status, services, filled, total]
+      properties:
+        clientId: { type: string }
+        clientName: { type: string }
+        month: { type: string }
+        status: { type: string, enum: [DRAFT, PUBLISHED, NOT_STARTED] }
+        services: { type: array, items: { type: string } }
+        filled: { type: integer }
+        total: { type: integer }
+        updatedAt: { type: string, format: date-time }
+    ReportInput:
+      type: object
+      required: [summary, sections]
+      properties:
+        summary: { type: string, maxLength: 2000 }
+        sections:
+          type: array
+          items:
+            type: object
+            required: [service, values]
+            properties:
+              service: { type: string }
+              highlight: { type: string, maxLength: 280 }
+              values: { type: object, additionalProperties: { type: number, nullable: true } }

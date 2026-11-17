@@ -60,7 +60,7 @@ function useToken(token: string, purpose: 'INVITE' | 'RESET' | 'MFA') {
   return t;
 }
 
-function sendEmail(to: string, subject: string, body: string, link?: string) {
+export function sendEmail(to: string, subject: string, body: string, link?: string) {
   outbox.unshift({ id: `em${outbox.length + 1}`, to, subject, body, link, at: now() });
 }
 
@@ -248,12 +248,12 @@ export function listOrganisations(user: User): Organisation[] {
   return organisations;
 }
 
-function sendInvite(row: UserRow, by: string) {
+export function sendInvite(row: UserRow, by: string) {
   const t = issueToken(row.id, 'INVITE', 7 * 24 * 60);
   sendEmail(row.email, `${by} invited you to the Webinger portal`, 'Open the link to set your password. It expires in 7 days.', `/accept-invite?token=${t}`);
 }
 
-function validateNew(name: string, email: string) {
+export function validateNew(name: string, email: string) {
   if (name.trim().length < 2) throw badRequest('Enter the person’s full name.');
   if (!EMAIL_RE.test(email.trim())) throw badRequest('Enter a valid email address.');
   if (rowByEmail(email)) throw conflict('Someone with this email already has an account.');

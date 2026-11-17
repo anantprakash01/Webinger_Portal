@@ -19,7 +19,33 @@ import type {
   Attachment,
   Availability,
   ChatMessage,
+  BillingOverview,
+  ClientReport,
+  ExpenseItem,
+  ExportFile,
+  ExportKind,
+  ExportLogItem,
+  FinanceSummary,
+  InvoiceDetail,
+  InvoiceListItem,
+  InvoiceStatus,
+  NewExpense,
+  NewInvoice,
+  NewQuote,
+  PaymentInput,
+  PaymentItem,
+  ProfitReport,
+  QuoteDetail,
+  QuoteListItem,
+  QuoteStatus,
+  ReportInput,
+  ReportStatusItem,
   ClientDashboard,
+  ClientDetail,
+  ClientListItem,
+  ClientPatch,
+  ClientQuery,
+  NewClient,
   Conversation,
   DownloadLink,
   FileDetail,
@@ -61,7 +87,10 @@ import type {
 import * as accounts from './mock/accounts';
 import * as approvalsMock from './mock/approvals';
 import * as chat from './mock/chat';
+import * as clientsMock from './mock/clients';
 import * as files from './mock/files';
+import * as finance from './mock/finance';
+import * as reportsMock from './mock/reports';
 import * as mock from './mock/handlers';
 
 const MODE = (import.meta.env.VITE_API_MODE ?? 'mock') as 'mock' | 'http';
@@ -311,6 +340,21 @@ export const api = {
     loginHistory: (userId?: string) =>
       isMock ? fromMock((u) => accounts.loginHistory(u, userId)) : http<LoginEvent[]>(`/admin/login-history${qs({ userId })}`),
   },
+  clients: {
+    list: (q: ClientQuery = {}) => (isMock ? fromMock((u) => clientsMock.listClients(u, q)) : http<ClientListItem[]>(`/clients${qs(q)}`)),
+    get: (id: string) => (isMock ? fromMock((u) => clientsMock.getClient(u, id)) : http<ClientDetail>(`/clients/${enc(id)}`)),
+    create: (body: NewClient) =>
+      isMock ? fromMock((u) => clientsMock.createClient(u, body)) : http<ClientDetail>('/clients', json('POST', body)),
+    update: (id: string, patch: ClientPatch) =>
+      isMock ? fromMock((u) => clientsMock.updateClient(u, id, patch)) : http<ClientDetail>(`/clients/${enc(id)}`, json('PATCH', patch)),
+    addNote: (id: string, text: string) =>
+      isMock ? fromMock((u) => clientsMock.addClientNote(u, id, text)) : http<ClientDetail>(`/clients/${enc(id)}/notes`, json('POST', { text })),
+    /** Active Webinger staff who can be an account manager or backup. */
+    managers: () =>
+      isMock
+        ? fromMock(clientsMock.staffChoices)
+        : http<Array<{ id: string; name: string; title?: string }>>('/clients/account-managers'),
+  },
   settings: {
     get: () => (isMock ? fromMock(accounts.getSettings) : http<PortalSettings>('/settings')),
     save: (body: PortalSettings) =>
@@ -364,6 +408,74 @@ export const api = {
       const f = files.resolveDownload(link.url);
       return { ...link, fileName: f.fileName, url: URL.createObjectURL(new Blob([f.content], { type: f.mime })) };
     },
+  },
+  /** Week 5. Admin finance: SUPER_ADMIN only. */
+  finance: {
+    summary: () => (isMock ? fromMock(finance.financeSummary) : http<FinanceSummary>('/finance/summary')),
+    invoices: (q: { status?: InvoiceStatus; clientId?: string; q?: string } = {}) =>
+      isMock ? fromMock((u) => finance.listInvoices(u, q)) : http<InvoiceListItem[]>(`/finance/invoices${qs(q)}`),
+    invoice: (id: string) => (isMock ? fromMock((u) => finance.getInvoice(u, id)) : http<InvoiceDetail>(`/finance/invoices/${enc(id)}`)),
+    createInvoice: (body: NewInvoice) =>
+      isMock ? fromMock((u) => finance.createInvoice(u, body)) : http<InvoiceDetail>('/finance/invoices', json('POST', body)),
+    updateInvoice: (id: string, body: Partial<NewInvoice>) =>
+      isMock ? fromMock((u) => finance.updateInvoice(u, id, body)) : http<InvoiceDetail>(`/finance/invoices/${enc(id)}`, json('PATCH', body)),
+    sendInvoice: (id: string) =>
+      isMock ? fromMock((u) => finance.sendInvoice(u, id)) : http<InvoiceDetail>(`/finance/invoices/${enc(id)}/send`, json('POST', {})),
+    remind: (id: string) =>
+      isMock ? fromMock((u) => finance.remindInvoice(u, id)) : http<InvoiceDetail>(`/finance/invoices/${enc(id)}/remind`, json('POST', {})),
+    cancel: (id: string, reason: string) =>
+      isMock ? fromMock((u) => finance.cancelInvoice(u, id, reason)) : http<InvoiceDetail>(`/finance/invoices/${enc(id)}/cancel`, json('POST', { reason })),
+    recordPayment: (id: string, body: PaymentInput) =>
+      isMock ? fromMock((u) => finance.recordPayment(u, id, body)) : http<InvoiceDetail>(`/finance/invoices/${enc(id)}/payments`, json('POST', body)),
+    quotes: (q: { status?: QuoteStatus; clientId?: string } = {}) =>
+      isMock ? fromMock((u) => finance.listQuotes(u, q)) : http<QuoteListItem[]>(`/finance/quotes${qs(q)}`),
+    quote: (id: string) => (isMock ? fromMock((u) => finance.getQuote(u, id)) : http<QuoteDetail>(`/finance/quotes/${enc(id)}`)),
+    createQuote: (body: NewQuote) => (isMock ? fromMock((u) => finance.createQuote(u, body)) : http<QuoteDetail>('/finance/quotes', json('POST', body))),
+    sendQuote: (id: string) =>
+      isMock ? fromMock((u) => finance.sendQuote(u, id)) : http<QuoteDetail>(`/finance/quotes/${enc(id)}/send`, json('POST', {})),
+    payments: (q: { clientId?: string } = {}) =>
+      isMock ? fromMock((u) => finance.listPayments(u, q)) : http<PaymentItem[]>(`/finance/payments${qs(q)}`),
+    expenses: (q: { month?: string; category?: string } = {}) =>
+      isMock ? fromMock((u) => finance.listExpenses(u, q)) : http<ExpenseItem[]>(`/finance/expenses${qs(q)}`),
+    createExpense: (body: NewExpense) =>
+      isMock ? fromMock((u) => finance.createExpense(u, body)) : http<ExpenseItem>('/finance/expenses', json('POST', body)),
+    profit: () => (isMock ? fromMock(finance.profitReport) : http<ProfitReport>('/finance/profit')),
+    /** CSV for the accountant. Every export is logged on the server. */
+    exportFile: (kind: ExportKind, from: string, to: string) =>
+      isMock ? fromMock((u) => finance.exportCsv(u, kind, from, to)) : http<ExportFile>(`/finance/export${qs({ kind, from, to })}`),
+    exports: () => (isMock ? fromMock(finance.exportHistory) : http<ExportLogItem[]>('/finance/exports')),
+    projects: (clientId: string) =>
+      isMock
+        ? fromMock((u) => finance.billableProjects(u, clientId))
+        : http<Array<{ id: string; name: string; service: string }>>(`/finance/projects${qs({ clientId })}`),
+  },
+  /** Week 5. Client billing: client roles with BILLING_VIEW, own company only. */
+  billing: {
+    overview: () => (isMock ? fromMock(finance.billingOverview) : http<BillingOverview>('/billing')),
+    invoice: (id: string) => (isMock ? fromMock((u) => finance.getBillingInvoice(u, id)) : http<InvoiceDetail>(`/billing/invoices/${enc(id)}`)),
+    /** Demo "Pay now". Phase 2 returns a payment-gateway order instead. */
+    pay: (id: string) => (isMock ? fromMock((u) => finance.payInvoice(u, id)) : http<InvoiceDetail>(`/billing/invoices/${enc(id)}/pay`, json('POST', {}))),
+    quote: (id: string) => (isMock ? fromMock((u) => finance.getBillingQuote(u, id)) : http<QuoteDetail>(`/billing/quotes/${enc(id)}`)),
+    accept: (id: string) =>
+      isMock ? fromMock((u) => finance.acceptQuote(u, id)) : http<QuoteDetail>(`/billing/quotes/${enc(id)}/accept`, json('POST', {})),
+    decline: (id: string, reason: string) =>
+      isMock ? fromMock((u) => finance.declineQuote(u, id, reason)) : http<QuoteDetail>(`/billing/quotes/${enc(id)}/decline`, json('POST', { reason })),
+  },
+  /** Week 5. Monthly client results. */
+  reports: {
+    mine: (month?: string) => (isMock ? fromMock((u) => reportsMock.clientReport(u, month)) : http<ClientReport>(`/reports${qs({ month })}`)),
+    statuses: (month?: string) =>
+      isMock ? fromMock((u) => reportsMock.reportStatuses(u, month)) : http<ReportStatusItem[]>(`/admin/reports${qs({ month })}`),
+    get: (clientId: string, month: string) =>
+      isMock ? fromMock((u) => reportsMock.adminReport(u, clientId, month)) : http<ClientReport>(`/admin/reports/${enc(clientId)}/${enc(month)}`),
+    save: (clientId: string, month: string, body: ReportInput) =>
+      isMock
+        ? fromMock((u) => reportsMock.saveReport(u, clientId, month, body))
+        : http<ClientReport>(`/admin/reports/${enc(clientId)}/${enc(month)}`, json('PUT', body)),
+    publish: (clientId: string, month: string) =>
+      isMock
+        ? fromMock((u) => reportsMock.publishReport(u, clientId, month))
+        : http<ClientReport>(`/admin/reports/${enc(clientId)}/${enc(month)}/publish`, json('POST', {})),
   },
   /** Prototype only: emails the mock would have sent, so invite and reset links can be opened. */
   demo: {

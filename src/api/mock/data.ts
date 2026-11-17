@@ -22,7 +22,6 @@ import type {
   ChecklistItem,
   Deliverable,
   Health,
-  InvoiceSummary,
   Priority,
   ProjectStatus,
   Role,
@@ -47,6 +46,8 @@ export const ORG = {
   TERRA: 'org-terra',
   NOVA: 'org-nova',
   SUNRISE: 'org-sunrise',
+  /** Former client: contract ended, no logins left. Shows the ENDED state on /admin/clients. */
+  BLUEPEAK: 'org-bluepeak',
   CREATOR: 'org-creator-ananya',
   VENDOR: 'org-vendor-lensworks',
 } as const;
@@ -55,6 +56,7 @@ export const CLIENT_NAME: Record<string, string> = {
   [ORG.TERRA]: 'Terra Foods',
   [ORG.NOVA]: 'Nova Clinics',
   [ORG.SUNRISE]: 'Sunrise Retail Group',
+  [ORG.BLUEPEAK]: 'Bluepeak Fitness',
 };
 
 /**
@@ -116,11 +118,12 @@ export const users: UserRow[] = [
 export const userById = (id: string) => users.find((u) => u.id === id);
 export const nameOf = (id: string) => userById(id)?.name ?? 'Unassigned';
 
-export const organisations = [
+export const organisations: Array<{ id: string; name: string; kind: 'AGENCY' | 'CLIENT' | 'INFLUENCER' | 'PARTNER' }> = [
   { id: ORG.WEBINGER, name: 'Webinger', kind: 'AGENCY' as const },
   { id: ORG.TERRA, name: 'Terra Foods', kind: 'CLIENT' as const },
   { id: ORG.NOVA, name: 'Nova Clinics', kind: 'CLIENT' as const },
   { id: ORG.SUNRISE, name: 'Sunrise Retail Group', kind: 'CLIENT' as const },
+  { id: ORG.BLUEPEAK, name: 'Bluepeak Fitness', kind: 'CLIENT' as const },
   { id: ORG.CREATOR, name: 'Ananya Rao', kind: 'INFLUENCER' as const },
   { id: ORG.VENDOR, name: 'Lensworks Studio', kind: 'PARTNER' as const },
 ];
@@ -609,13 +612,7 @@ const generatedTasks: TaskRow[] = generated.flatMap((p, i) => {
 
 export const tasks: TaskRow[] = [...handTasks, ...generatedTasks];
 
-/* ------------------------------------------------------- other week 1 data */
-
-export const invoices: Array<InvoiceSummary & { organisationId: string }> = [
-  { id: 'i1', organisationId: ORG.TERRA, number: 'WEB/2026-27/0112', clientName: 'Terra Foods', amount: 59000, due: day(5), status: 'SENT' },
-  { id: 'i2', organisationId: ORG.NOVA, number: 'WEB/2026-27/0098', clientName: 'Nova Clinics', amount: 82600, due: day(-17), status: 'OVERDUE' },
-  { id: 'i3', organisationId: ORG.NOVA, number: 'WEB/2026-27/0105', clientName: 'Nova Clinics', amount: 35400, due: day(-4), status: 'OVERDUE' },
-];
+/* Invoices moved to data5.ts (Week 5 finance). */
 
 /* --------------------------------------------------------------- approvals */
 

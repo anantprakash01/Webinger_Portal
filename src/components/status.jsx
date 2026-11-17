@@ -79,3 +79,29 @@ export const AccountStatusBadge = ({ status, clientView }) => (
   <Badge tone={ACCOUNT[status][0]}>{ACCOUNT[status][clientView ? 2 : 1]}</Badge>
 );
 export const ACCOUNT_STATUS_OPTIONS = Object.entries(ACCOUNT).map(([value, [, label]]) => ({ value, label }));
+
+const CLIENT_STATUS = {
+  ONBOARDING: ['info', 'Onboarding'],
+  ACTIVE: ['ok', 'Active'],
+  PAUSED: ['warn', 'Paused'],
+  ENDED: ['neutral', 'Ended'],
+};
+export const ClientStatusBadge = ({ status }) => <Badge tone={CLIENT_STATUS[status][0]}>{CLIENT_STATUS[status][1]}</Badge>;
+export const CLIENT_STATUS_OPTIONS = Object.entries(CLIENT_STATUS).map(([value, [, label]]) => ({ value, label }));
+
+const CONTRACT = {
+  ACTIVE: ['ok', 'Running'],
+  ENDING_SOON: ['warn', 'Renew soon'],
+  ENDED: ['neutral', 'Ended'],
+};
+export const ContractStatusBadge = ({ status }) => <Badge tone={CONTRACT[status][0]}>{CONTRACT[status][1]}</Badge>;
+
+/** Health level plus the 0–100 score, e.g. "At risk · 45". */
+export const HealthScore = ({ health, score }) => (
+  <span className="health-score">
+    <HealthBadge health={health} />
+    <span className={`health-score__num health-score__num--${health.toLowerCase()}`} title="Health score out of 100">
+      {score}
+    </span>
+  </span>
+);
