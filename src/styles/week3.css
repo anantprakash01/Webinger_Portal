@@ -65,32 +65,24 @@
 
 .pin {
   position: absolute;
-  transform: translate(-50%, -100%);
+  transform: translate(-50%, -50%);
   display: grid;
   place-items: center;
   width: 28px;
   height: 28px;
+  padding: 0;
   border: 2px solid #fff;
-  border-radius: 50% 50% 50% 0;
-  rotate: -45deg;
+  border-radius: 50%;
   background: var(--ink);
   color: #fff;
-  font-size: 12px;
-  font-weight: 800;
-  line-height: 1;
+  font: 800 12px/1 var(--font);
   cursor: pointer;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
-  padding: 0;
 }
-.pin > * , .pin { font-family: var(--font); }
-.pin:not(.pin--static) { text-indent: 0; }
-.pin { --r: 45deg; }
-.pin::first-line { rotate: 45deg; }
 .pin--agency { background: var(--navy); }
-.pin.is-active { background: var(--brand-red); z-index: 2; scale: 1.15; }
+.pin.is-active { background: var(--brand-red); z-index: 2; transform: translate(-50%, -50%) scale(1.15); }
 .pin--draft { background: transparent; border: 3px solid var(--info); box-shadow: 0 0 0 4px rgba(29, 95, 191, 0.25); pointer-events: none; }
-.pin--static { position: static; transform: none; rotate: 0deg; border-radius: 50%; width: 24px; height: 24px; flex-shrink: 0; cursor: inherit; }
-.pin:not(.pin--static) { text-align: center; }
+.pin--static { position: static; transform: none; width: 24px; height: 24px; flex-shrink: 0; cursor: inherit; }
 
 .pin-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .pin-list__item {
@@ -184,4 +176,11 @@ select.field__input { appearance: auto; }
   .user-actions { justify-content: flex-start !important; }
   .table--rows td[data-label='Actions'] { display: block; text-align: left !important; padding-top: 8px; }
   .table--rows td[data-label='Actions']::before { display: none; }
+}
+.link-btn { display: block; padding: 0; margin-top: 2px; border: 0; background: none; color: var(--ink-3); font-size: var(--fs-xs); font-weight: 600; text-decoration: underline; cursor: pointer; }
+.link-btn:hover { color: var(--ink); }
+.user-actions { flex-wrap: nowrap !important; }
+@media (max-width: 720px) { .user-actions { flex-wrap: wrap !important; } }
+@media (max-width: 720px) {
+  .table--rows .td--title, .table--rows .td--title > .row { text-align: left; justify-content: flex-start; }
 }

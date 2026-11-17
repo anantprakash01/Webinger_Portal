@@ -77,7 +77,9 @@ export function ClientHome() {
                       {a.projectName} · sent {timeAgo(a.submittedAt)} · revision {a.revisionsUsed} of {a.revisionsAllowed}
                     </div>
                   </div>
-                  <Button size="sm">Review</Button>
+                  <Link to={`/client/approvals/${a.id}`} className="btn btn--primary btn--sm">
+                    Review
+                  </Link>
                 </li>
               ))}
               {data.unpaidInvoices.map((i) => (

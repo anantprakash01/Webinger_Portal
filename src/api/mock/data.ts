@@ -234,7 +234,7 @@ const handWritten: ProjectRow[] = [
     progress: 64,
     ownerId: 'u-emp',
     backupId: 'u-meera',
-    memberIds: ['u-emp', 'u-meera', 'u-aarav', 'u-rep'],
+    memberIds: ['u-emp', 'u-meera', 'u-aarav', 'u-rep', 'u-rep2'],
     startDate: day(-75),
     endDate: day(290),
     scope: 'Instagram and Facebook management: 16 posts, 8 reels and 20 stories a month, community replies within business hours, monthly performance report.',

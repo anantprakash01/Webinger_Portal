@@ -58,7 +58,7 @@ export function EmployeeHome() {
         <Card title="Later this week">
           <TaskList tasks={data.thisWeek} empty="Nothing else due this week" />
         </Card>
-        <Card title="Waiting for your review">
+        <Card title="Waiting for your review" action={<Link to="/employee/review" className="small row">Open queue <LuArrowRight aria-hidden /></Link>}>
           <TaskList tasks={data.reviewQueue} empty="Review queue is empty" />
         </Card>
         <Card title="Client messages" action={<Link to="/employee/messages" className="small row">Open chat <LuArrowRight aria-hidden /></Link>}>
