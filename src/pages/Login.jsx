@@ -182,6 +182,7 @@ export function LoginPage() {
           <Link to="/forgot-password" state={{ email }}>
             Forgot password?
           </Link>
+          <Link to="/join">Creator? Join our network</Link>
         </div>
 
         {isMock && (

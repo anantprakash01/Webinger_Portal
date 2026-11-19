@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { LuArrowRight, LuClock, LuMail, LuPhone, LuSparkles, LuX } from 'react-icons/lu';
 import { useState } from 'react';
-import { useDashboard } from '@/api/queries';
+import { useDashboard, useOfferAction } from '@/api/queries';
 import { useAuth } from '@/auth/AuthContext';
 import { HealthBadge, InvoiceBadge, timeAgo } from '@/components/status';
 import {
@@ -22,6 +22,8 @@ export function ClientHome() {
   const { user } = useAuth();
   const { data, error, isPending: loading, refetch: reload } = useDashboard('client');
   const [offerHidden, setOfferHidden] = useState(false);
+  const offerAction = useOfferAction();
+  const [offerReply, setOfferReply] = useState(null);
 
   if (loading && !data) return <PageSkeleton />;
   if (error || !data) return <div className="page"><ErrorState message={error?.message ?? 'No data'} onRetry={reload} /></div>;
@@ -46,13 +48,28 @@ export function ClientHome() {
           <div style={{ flex: 1, minWidth: 200 }}>
             <strong>{data.offer.title}.</strong> <span className="small">{data.offer.text}</span>
           </div>
-          <Button size="sm" variant="secondary">{data.offer.cta}</Button>
+          {offerReply ? (
+            <span className="small" role="status">{offerReply}</span>
+          ) : (
+            <Button
+              size="sm"
+              variant="secondary"
+              loading={offerAction.isPending}
+              onClick={() => offerAction.mutate({ kind: 'click', id: data.offer.id }, { onSuccess: (r) => setOfferReply(r.message) })}
+            >
+              {data.offer.cta}
+            </Button>
+          )}
           <Button
             size="sm"
             variant="ghost"
             icon
             aria-label="Dismiss offer"
-            onClick={() => setOfferHidden(true)}
+            onClick={() => {
+              setOfferHidden(true);
+              // Remembered on the server for this person, so it stays hidden next time.
+              offerAction.mutate({ kind: 'dismiss', id: data.offer.id });
+            }}
             style={{ position: 'absolute', top: 6, right: 6 }}
           >
             <LuX />

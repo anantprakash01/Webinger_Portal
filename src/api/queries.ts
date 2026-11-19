@@ -36,6 +36,16 @@ import type {
   UserInvite,
 } from '@/types';
 import type {
+  CollabRequestInput,
+  DiscoveryQuery,
+  NewBrief,
+  NewCampaign,
+  NewMediaContact,
+  NewPartnerInvoice,
+  OfferInput,
+  PitchStatus,
+  ProfileInput,
+  VerificationStatus,
   ConvertLead,
   LeadActivityInput,
   LeadPatch,
@@ -607,3 +617,137 @@ export function useMeAction() {
     },
   });
 }
+
+/* ---------- Week 7: influencers, partners, PR, offers ---------- */
+
+/** One generic mutation hook per module keeps the screens small; each refreshes its whole query family. */
+function useModuleAction<A>(fn: (a: A) => Promise<any>, families: string[][]) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => families.forEach((queryKey) => void qc.invalidateQueries({ queryKey })),
+  });
+}
+
+export const useMyInfluencerProfile = () => useQuery({ queryKey: ['creator', 'profile'], queryFn: api.influencers.myProfile });
+export const useMyCampaigns = () => useQuery({ queryKey: ['creator', 'campaigns'], queryFn: api.influencers.myCampaigns });
+export const useMyPayouts = () => useQuery({ queryKey: ['creator', 'payouts'], queryFn: api.influencers.myPayouts });
+
+type CreatorAction =
+  | { kind: 'profile'; body: ProfileInput }
+  | { kind: 'submit' }
+  | { kind: 'respond'; id: string; action: 'ACCEPT' | 'COUNTER' | 'DECLINE'; counterFee?: number }
+  | { kind: 'draft'; id: string; body: { caption: string; fileName: string; disclosure: boolean } }
+  | { kind: 'live'; id: string; body: { liveUrl: string; proofFile: string } };
+
+export const useCreatorAction = () =>
+  useModuleAction(
+    (a: CreatorAction) =>
+      a.kind === 'profile'
+        ? api.influencers.updateProfile(a.body)
+        : a.kind === 'submit'
+          ? api.influencers.submitProfile()
+          : a.kind === 'respond'
+            ? api.influencers.respond(a.id, a.action, a.counterFee)
+            : a.kind === 'draft'
+              ? api.influencers.submitDraft(a.id, a.body)
+              : api.influencers.submitLive(a.id, a.body),
+    [['creator'], ['dashboard']],
+  );
+
+export const useDiscovery = (q: DiscoveryQuery) =>
+  useQuery({ queryKey: ['discovery', q], queryFn: () => api.influencers.discover(q), placeholderData: keepPreviousData });
+export const useMyCollabRequests = () => useQuery({ queryKey: ['discovery', 'requests'], queryFn: api.influencers.myRequests });
+export const useDiscoveryAction = () =>
+  useModuleAction(
+    (a: { kind: 'shortlist'; id: string } | { kind: 'request'; body: CollabRequestInput }) =>
+      a.kind === 'shortlist' ? api.influencers.toggleShortlist(a.id) : api.influencers.requestCollab(a.body),
+    [['discovery']],
+  );
+
+export const useInfluencerAdmin = (q: { verification?: VerificationStatus; q?: string }) =>
+  useQuery({ queryKey: ['influencers', 'list', q], queryFn: () => api.influencers.list(q), placeholderData: keepPreviousData });
+export const useCollabRequests = () => useQuery({ queryKey: ['influencers', 'requests'], queryFn: api.influencers.requests });
+export const useCampaigns = () => useQuery({ queryKey: ['influencers', 'campaigns'], queryFn: api.influencers.campaigns });
+export const useCampaign = (id: string | null) =>
+  useQuery({ queryKey: ['influencers', 'campaign', id], queryFn: () => api.influencers.campaign(id!), enabled: !!id });
+export const useInfluencerPayouts = () => useQuery({ queryKey: ['influencers', 'payouts'], queryFn: api.influencers.payouts });
+
+type InfluencerAdminAction =
+  | { kind: 'decide'; id: string; decision: 'VERIFY' | 'REJECT'; reason?: string }
+  | { kind: 'createCampaign'; body: NewCampaign }
+  | { kind: 'invite'; id: string; body: { influencerId: string; fee: number; respondBy: string; draftDue: string } }
+  | { kind: 'counter'; id: string; influencerId: string; accept: boolean }
+  | { kind: 'review'; id: string; influencerId: string; decision: 'APPROVE' | 'CHANGES'; feedback?: string }
+  | { kind: 'rate'; id: string; influencerId: string; rating: number }
+  | { kind: 'approvePayout'; id: string }
+  | { kind: 'rejectPayout'; id: string; reason: string }
+  | { kind: 'paid'; id: string; reference: string };
+
+export const useInfluencerAdminAction = () =>
+  useModuleAction((a: InfluencerAdminAction) => {
+    switch (a.kind) {
+      case 'decide': return api.influencers.decide(a.id, a.decision, a.reason);
+      case 'createCampaign': return api.influencers.createCampaign(a.body);
+      case 'invite': return api.influencers.invite(a.id, a.body);
+      case 'counter': return api.influencers.decideCounter(a.id, a.influencerId, a.accept);
+      case 'review': return api.influencers.reviewDraft(a.id, a.influencerId, a.decision, a.feedback);
+      case 'rate': return api.influencers.rate(a.id, a.influencerId, a.rating);
+      case 'approvePayout': return api.influencers.approvePayout(a.id);
+      case 'rejectPayout': return api.influencers.rejectPayout(a.id, a.reason);
+      case 'paid': return api.influencers.markPaid(a.id, a.reference);
+    }
+  }, [['influencers'], ['dashboard'], ['finance'], ['demo']]);
+
+export const useMyBriefs = () => useQuery({ queryKey: ['partner', 'briefs'], queryFn: api.partners.myBriefs });
+export const useMyPartnerInvoices = () => useQuery({ queryKey: ['partner', 'invoices'], queryFn: api.partners.myInvoices });
+export const usePartnerAction = () =>
+  useModuleAction(
+    (a: { kind: 'start'; id: string } | { kind: 'submit'; id: string; body: { files: string[]; note: string } } | { kind: 'invoice'; body: NewPartnerInvoice }) =>
+      a.kind === 'start' ? api.partners.start(a.id) : a.kind === 'submit' ? api.partners.submit(a.id, a.body) : api.partners.submitInvoice(a.body),
+    [['partner'], ['dashboard']],
+  );
+
+export const usePrHub = () => useQuery({ queryKey: ['pr', 'hub'], queryFn: api.partners.hub });
+export const useAdminBriefs = () => useQuery({ queryKey: ['pr', 'briefs'], queryFn: api.partners.briefs });
+export const useAdminPartnerInvoices = () => useQuery({ queryKey: ['pr', 'invoices'], queryFn: api.partners.invoices });
+
+type PrAction =
+  | { kind: 'contact'; body: NewMediaContact }
+  | { kind: 'updateContact'; id: string; patch: { verified?: boolean; doNotContact?: boolean; consent?: boolean } }
+  | { kind: 'pitch'; body: { title: string; clientId: string; recipientIds: string[] } }
+  | { kind: 'pitchStatus'; id: string; status: PitchStatus }
+  | { kind: 'coverage'; body: { clientId: string; outlet: string; headline: string; url: string; date: string; reach: number; pitchId?: string } }
+  | { kind: 'brief'; body: NewBrief }
+  | { kind: 'reviewBrief'; id: string; decision: 'APPROVE' | 'CHANGES'; feedback?: string }
+  | { kind: 'invoice'; id: string; decision: 'APPROVE' | 'REJECT' | 'PAID'; note?: string }
+  | { kind: 'export' };
+
+export const usePrAction = () =>
+  useModuleAction((a: PrAction) => {
+    switch (a.kind) {
+      case 'contact': return api.partners.addContact(a.body);
+      case 'updateContact': return api.partners.updateContact(a.id, a.patch);
+      case 'pitch': return api.partners.createPitch(a.body);
+      case 'pitchStatus': return api.partners.updatePitch(a.id, a.status);
+      case 'coverage': return api.partners.addCoverage(a.body);
+      case 'brief': return api.partners.createBrief(a.body);
+      case 'reviewBrief': return api.partners.reviewBrief(a.id, a.decision, a.feedback);
+      case 'invoice': return api.partners.decideInvoice(a.id, a.decision, a.note);
+      case 'export': return api.partners.exportContacts();
+    }
+  }, [['pr'], ['finance']]);
+
+export const useOffers = () => useQuery({ queryKey: ['offers'], queryFn: api.offers.list });
+export const useOfferAction = () =>
+  useModuleAction(
+    (a: { kind: 'create'; body: OfferInput } | { kind: 'update'; id: string; body: OfferInput } | { kind: 'click'; id: string } | { kind: 'dismiss'; id: string }) =>
+      a.kind === 'create'
+        ? api.offers.create(a.body)
+        : a.kind === 'update'
+          ? api.offers.update(a.id, a.body)
+          : a.kind === 'click'
+            ? api.offers.click(a.id)
+            : api.offers.dismiss(a.id),
+    [['offers']],
+  );

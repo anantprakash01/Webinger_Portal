@@ -41,6 +41,9 @@ import { balanceOf, daysLateOf, invoiceSummary, recurringRevenue, unpaidInvoices
 import { latestResults } from './reports';
 import { dashboardPipeline } from './pipeline';
 import { dashboardScorecard, teamLoad } from './people';
+import { influencerHome, payoutsNeedingOwner } from './influencers';
+import { partnerHome } from './partners';
+import { offerFor } from './offers';
 import {
   approvals,
   CLIENT_NAME,
@@ -194,7 +197,8 @@ export function adminDashboard(user: User): AdminDashboard {
     waitingOnYou:
       user.role === 'SUPER_ADMIN'
         ? [
-            { id: 'w1', kind: 'PAYOUT', text: 'Influencer payout of ₹45,000 is above the deputy limit' },
+            // Week 7: live list of influencer payouts above the deputy limit.
+            ...payoutsNeedingOwner(),
             { id: 'w2', kind: 'PAUSE', text: 'Nova Clinics invoice 17 days overdue: pause work?' },
             { id: 'w3', kind: 'DISCOUNT', text: '10% renewal discount requested for Terra Foods' },
           ]
@@ -234,12 +238,8 @@ export function clientDashboard(user: User): ClientDashboard {
     // Headline numbers from the latest published monthly report (Week 5).
     ...latestResults(user),
     messages: previewsFor(user),
-    offer: {
-      id: 'o1',
-      title: 'Add influencer marketing',
-      text: 'Reach food lovers in your city through verified local creators.',
-      cta: 'Learn more',
-    },
+    // Week 7: one offer for a service this client doesn't buy yet (Admin → Offers).
+    offer: offerFor(user),
   };
 }
 
@@ -262,24 +262,12 @@ export function employeeDashboard(user: User): EmployeeDashboard {
 
 export function influencerDashboard(user: User): InfluencerDashboard {
   requireArea(user, 'influencer');
-  return {
-    verification: 'VERIFIED',
-    profileCompleteness: 85,
-    invites: [{ id: 'c1', brand: 'Terra Foods', campaign: 'Winter menu launch', deliverable: '1 reel + 3 stories', fee: 18000, respondBy: day(2) }],
-    active: [{ id: 'c2', brand: 'Nova Clinics', campaign: 'Skin care awareness', step: 'Draft due for approval', due: day(1) }],
-    payouts: { pending: 12000, paidThisYear: 146000 },
-  };
+  return influencerHome(user);
 }
 
 export function partnerDashboard(user: User): PartnerDashboard {
   requireArea(user, 'partner');
-  return {
-    briefs: [
-      { id: 'b1', title: 'Product shoot: 12 dishes', projectName: 'Social media retainer', due: day(4), status: 'IN_PROGRESS' },
-      { id: 'b2', title: 'Clinic interior photos', projectName: 'Brand identity', due: day(10), status: 'NEW' },
-    ],
-    invoices: [{ id: 'pi1', number: 'LW-0441', amount: 24000, status: 'SENT' }],
-  };
+  return partnerHome(user);
 }
 
 /* -------------------------------------------------------------- projects */

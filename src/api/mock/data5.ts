@@ -504,3 +504,10 @@ export const reports: ReportRow[] = [
 ];
 // Nova's draft is missing one number, so it cannot be published until someone fills it in (automation rule 11).
 reports.find((r) => r.organisationId === ORG.NOVA && r.status === 'DRAFT')!.sections[0].values.ctr = null;
+
+/** Week 7: a paid partner invoice becomes an expense charged to the brief's project. Returns the expense id. */
+export function expenseFromPartner(e: { vendor: string; description: string; amount: number; gst: number; projectId: string; recordedBy: string }): string {
+  const row: ExpenseRow = { id: `ex${Date.now().toString(36)}`, date: day(0), category: 'FREELANCER', ...e };
+  expenses.push(row);
+  return row.id;
+}

@@ -48,13 +48,13 @@ const rowByEmail = (email: string) => users.find((u) => u.email.toLowerCase() ==
 const now = () => new Date().toISOString();
 const randomToken = () => Array.from(crypto.getRandomValues(new Uint8Array(18)), (b) => b.toString(16).padStart(2, '0')).join('');
 
-function issueToken(userId: string, purpose: 'INVITE' | 'RESET' | 'MFA', minutes: number) {
+function issueToken(userId: string, purpose: 'INVITE' | 'RESET' | 'MFA' | 'VERIFY', minutes: number) {
   const t = randomToken();
   tokens.set(t, { userId, purpose, expiresAt: Date.now() + minutes * MINUTE, used: false });
   return t;
 }
 
-function useToken(token: string, purpose: 'INVITE' | 'RESET' | 'MFA') {
+function useToken(token: string, purpose: 'INVITE' | 'RESET' | 'MFA' | 'VERIFY') {
   const t = tokens.get(token);
   if (!t || t.purpose !== purpose || t.used || t.expiresAt < Date.now()) return null;
   return t;
@@ -116,6 +116,8 @@ export function login(email: string, password: string): LoginResult {
   }
   // Only someone with the right password learns the account is suspended.
   if (row.status === 'SUSPENDED') throw new ApiError({ status: 403, title: 'Forbidden', detail: 'This account is suspended. Contact your Webinger account manager.' });
+  // Self sign-up (influencers): the password is set but the email is not verified yet.
+  if (row.status === 'INVITED') throw new ApiError({ status: 403, title: 'Forbidden', detail: 'Verify your email first. Open the link we sent you.' });
   if (row.mfaEnabled) {
     return { mfaRequired: true, mfaToken: issueToken(row.id, 'MFA', 5), method: 'Authenticator app' };
   }
@@ -470,4 +472,31 @@ export function updateRep(user: User, id: string, patch: RepPatch): ClientTeamMe
 /** Demo only. The prototype has no inbox, so screens can show the email that would have been sent. */
 export function demoOutbox(to?: string) {
   return outbox.filter((m) => !to || m.to.toLowerCase() === to.toLowerCase()).slice(0, 20);
+}
+
+/* ------------------------------------------------- self sign-up (Week 7) */
+
+/**
+ * Influencers are the only people who create their own account (CLAUDE.md section 14).
+ * BACKEND: bot check and per-IP rate limit on the sign-up endpoint; the account stays INVITED
+ * (cannot sign in) until the emailed link (24 h, single use) is opened.
+ */
+export function registerSelfSignup(row: UserRow, password: string) {
+  const problem = passwordProblem(password);
+  if (problem) throw badRequest(problem);
+  if (rowByEmail(row.email)) throw conflict('An account with this email already exists. Sign in or reset your password.');
+  users.push(row);
+  passwords.set(row.id, password);
+  const t = issueToken(row.id, 'VERIFY', 24 * 60);
+  sendEmail(row.email, 'Confirm your email for Webinger Creators', 'Open the link to confirm your email and finish your profile. It expires in 24 hours.', `/verify-email?token=${t}`);
+}
+
+/** POST /public/influencers/verify: confirms the email, activates the account and signs in. */
+export function verifyEmail(token: string): Session {
+  const t = useToken(token, 'VERIFY');
+  if (!t) throw new ApiError({ status: 410, title: 'Gone', detail: 'This link has expired or was already used. Sign up again or sign in.' });
+  const row = rowById(t.userId)!;
+  t.used = true;
+  row.status = 'ACTIVE';
+  return newSession(row);
 }

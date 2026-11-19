@@ -135,7 +135,7 @@ export const DEMO_MFA_CODE = '123456';
 export const passwords = new Map<string, string>();
 
 /** One-time tokens for invite, password-reset and two-step links. */
-export const tokens = new Map<string, { userId: string; purpose: 'INVITE' | 'RESET' | 'MFA'; expiresAt: number; used: boolean }>();
+export const tokens = new Map<string, { userId: string; purpose: 'INVITE' | 'RESET' | 'MFA' | 'VERIFY'; expiresAt: number; used: boolean }>();
 
 /** Emails the system would have sent. Demo only, so links can be opened without an inbox. */
 export const outbox: Array<{ id: string; to: string; subject: string; body: string; link?: string; at: string }> = [];

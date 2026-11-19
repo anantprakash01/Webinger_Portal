@@ -42,6 +42,8 @@ export function AuthProvider({ children }) {
 
   const verifyMfa = useCallback(async (token, code) => start(await api.auth.verifyMfa(token, code)), [start]);
   const acceptInvite = useCallback(async (token, password) => start(await api.auth.acceptInvite(token, password)), [start]);
+  /** Week 7: influencer self sign-up confirms the email and signs in. */
+  const verifyEmail = useCallback(async (token) => start(await api.influencers.verifyEmail(token)), [start]);
 
   const logout = useCallback(async () => {
     await api.auth.logout();
@@ -50,8 +52,8 @@ export function AuthProvider({ children }) {
   }, []);
 
   const value = useMemo(
-    () => ({ user, area: user ? AREA_BY_ROLE[user.role] : null, login, verifyMfa, acceptInvite, logout }),
-    [user, login, verifyMfa, acceptInvite, logout],
+    () => ({ user, area: user ? AREA_BY_ROLE[user.role] : null, login, verifyMfa, acceptInvite, verifyEmail, logout }),
+    [user, login, verifyMfa, acceptInvite, verifyEmail, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

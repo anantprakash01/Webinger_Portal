@@ -15,6 +15,15 @@ import { AdminFinance } from '@/pages/admin/AdminFinance';
 import { AdminInvoice } from '@/pages/admin/AdminInvoice';
 import { AdminReports } from '@/pages/admin/AdminReports';
 import { AdminPeople } from '@/pages/admin/AdminPeople';
+import { AdminInfluencers } from '@/pages/admin/AdminInfluencers';
+import { AdminOffers } from '@/pages/admin/AdminOffers';
+import { AdminPr } from '@/pages/admin/AdminPr';
+import { ClientInfluencers } from '@/pages/client/ClientInfluencers';
+import { InfluencerCampaigns } from '@/pages/influencer/InfluencerCampaigns';
+import { InfluencerPayouts } from '@/pages/influencer/InfluencerPayouts';
+import { InfluencerProfile } from '@/pages/influencer/InfluencerProfile';
+import { PartnerBriefs, PartnerInvoices } from '@/pages/partner/PartnerPages';
+import { InfluencerSignupPage, VerifyEmailPage } from '@/pages/auth/InfluencerSignup';
 import { AdminPipeline } from '@/pages/admin/AdminPipeline';
 import { EmployeeLeave } from '@/pages/employee/EmployeeLeave';
 import { EmployeePerformance } from '@/pages/employee/EmployeePerformance';
@@ -72,6 +81,15 @@ const PAGES = {
   '/employee/timesheet': EmployeeTimesheet,
   '/employee/performance': EmployeePerformance,
   '/employee/leave': EmployeeLeave,
+  '/admin/influencers': AdminInfluencers,
+  '/admin/pr': AdminPr,
+  '/admin/offers': AdminOffers,
+  '/client/influencers': ClientInfluencers,
+  '/influencer/campaigns': InfluencerCampaigns,
+  '/influencer/profile': InfluencerProfile,
+  '/influencer/payouts': InfluencerPayouts,
+  '/partner/briefs': PartnerBriefs,
+  '/partner/invoices': PartnerInvoices,
 };
 
 /**
@@ -115,6 +133,9 @@ export default function App() {
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/accept-invite" element={<AcceptInvitePage />} />
+          {/* Week 7: the only public sign-up (creators). */}
+          <Route path="/join" element={<InfluencerSignupPage />} />
+          <Route path="/verify-email" element={<VerifyEmailPage />} />
           <Route path="/" element={<RootRedirect />} />
 
           {Object.keys(HOME).map((area) => {
