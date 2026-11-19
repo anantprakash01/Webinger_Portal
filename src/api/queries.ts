@@ -36,6 +36,17 @@ import type {
   UserInvite,
 } from '@/types';
 import type {
+  ConvertLead,
+  LeadActivityInput,
+  LeadPatch,
+  LeadSource,
+  LeaveDecisionInput,
+  LeaveStatus,
+  NewLead,
+  NewLeave,
+  NewTimeEntry,
+  PipelineBoard,
+  TimerStart,
   ExportKind,
   InvoiceStatus,
   NewExpense,
@@ -477,6 +488,122 @@ export function useReportAction() {
       qc.setQueryData(['reports', 'admin', r.clientId, r.month], r);
       void qc.invalidateQueries({ queryKey: ['reports', 'statuses'] });
       void qc.invalidateQueries({ queryKey: ['demo'] });
+    },
+  });
+}
+
+/* ---------- Week 6: pipeline, people, time ---------- */
+
+export const usePipeline = (q: { q?: string; ownerId?: string; source?: LeadSource }) =>
+  useQuery({ queryKey: ['pipeline', 'board', q], queryFn: () => api.pipeline.board(q), placeholderData: keepPreviousData });
+export const useLead = (id: string | null) => useQuery({ queryKey: ['pipeline', 'lead', id], queryFn: () => api.pipeline.lead(id!), enabled: !!id });
+
+type LeadAction =
+  | { kind: 'create'; body: NewLead }
+  | { kind: 'update'; id: string; patch: LeadPatch }
+  | { kind: 'activity'; id: string; body: LeadActivityInput }
+  | { kind: 'convert'; id: string; body: ConvertLead };
+
+/** Lead writes. Stage moves are optimistic on the board and roll back if the server refuses. */
+export function useLeadAction() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (a: LeadAction) =>
+      a.kind === 'create'
+        ? api.pipeline.create(a.body)
+        : a.kind === 'update'
+          ? api.pipeline.update(a.id, a.patch)
+          : a.kind === 'activity'
+            ? api.pipeline.addActivity(a.id, a.body)
+            : api.pipeline.convert(a.id, a.body),
+    onMutate: async (a) => {
+      if (a.kind !== 'update' || !a.patch.stage) return undefined;
+      await qc.cancelQueries({ queryKey: ['pipeline', 'board'] });
+      const snapshot = qc.getQueriesData<PipelineBoard>({ queryKey: ['pipeline', 'board'] });
+      qc.setQueriesData<PipelineBoard>({ queryKey: ['pipeline', 'board'] }, (old) =>
+        old ? { ...old, leads: old.leads.map((l) => (l.id === a.id ? { ...l, stage: a.patch.stage! } : l)) } : old,
+      );
+      return { snapshot };
+    },
+    onError: (_e, _a, ctx) => ctx?.snapshot?.forEach(([key, data]) => qc.setQueryData(key, data)),
+    onSuccess: (lead, a) => {
+      qc.setQueryData(['pipeline', 'lead', lead.id], lead);
+      if (a.kind === 'convert') {
+        void qc.invalidateQueries({ queryKey: ['clients'] });
+        void qc.invalidateQueries({ queryKey: ['projects'] });
+        void qc.invalidateQueries({ queryKey: ['admin'] });
+        void qc.invalidateQueries({ queryKey: ['demo'] });
+      }
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ['pipeline', 'board'] });
+      void qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+}
+
+export const usePeople = () => useQuery({ queryKey: ['people', 'list'], queryFn: api.people.list });
+export const useAttendanceWeek = (week?: string) =>
+  useQuery({ queryKey: ['people', 'attendance', week], queryFn: () => api.people.attendance(week), placeholderData: keepPreviousData });
+export const useLeaveRequests = (status?: LeaveStatus) =>
+  useQuery({ queryKey: ['people', 'leave', status], queryFn: () => api.people.leave({ status }) });
+export const useWorkload = (week?: string) =>
+  useQuery({ queryKey: ['people', 'workload', week], queryFn: () => api.people.workload(week), placeholderData: keepPreviousData });
+export const useScorecards = () => useQuery({ queryKey: ['people', 'scorecards'], queryFn: api.people.scorecards });
+export const useScorecard = (id: string | null) =>
+  useQuery({ queryKey: ['people', 'scorecard', id], queryFn: () => api.people.scorecard(id!), enabled: !!id });
+
+export function useDecideLeave() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: LeaveDecisionInput }) => api.people.decideLeave(id, body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['people'] });
+      void qc.invalidateQueries({ queryKey: ['tasks'] });
+      void qc.invalidateQueries({ queryKey: ['projects'] });
+      void qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+}
+
+export const useMyAttendance = () => useQuery({ queryKey: ['me', 'attendance'], queryFn: api.me.attendance });
+export const useMyLeave = () => useQuery({ queryKey: ['me', 'leave'], queryFn: api.me.leave });
+export const useMyPerformance = () => useQuery({ queryKey: ['me', 'performance'], queryFn: api.me.performance });
+export const useMyTimesheet = (week?: string) =>
+  useQuery({ queryKey: ['me', 'timesheet', week ?? 'current'], queryFn: () => api.me.timesheet(week), placeholderData: keepPreviousData });
+
+type MeAction =
+  | { kind: 'checkIn'; mode: 'OFFICE' | 'WFH' }
+  | { kind: 'checkOut' }
+  | { kind: 'requestLeave'; body: NewLeave }
+  | { kind: 'cancelLeave'; id: string }
+  | { kind: 'addTime'; body: NewTimeEntry }
+  | { kind: 'deleteTime'; id: string }
+  | { kind: 'startTimer'; body: TimerStart }
+  | { kind: 'stopTimer' }
+  | { kind: 'submitWeek'; weekStart: string };
+
+/** Every self-service write; refreshes the person's own pages, dashboards and the team views. */
+export function useMeAction() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (a: MeAction): Promise<any> => {
+      switch (a.kind) {
+        case 'checkIn': return api.me.checkIn(a.mode);
+        case 'checkOut': return api.me.checkOut();
+        case 'requestLeave': return api.me.requestLeave(a.body);
+        case 'cancelLeave': return api.me.cancelLeave(a.id);
+        case 'addTime': return api.me.addTime(a.body);
+        case 'deleteTime': return api.me.deleteTime(a.id);
+        case 'startTimer': return api.me.startTimer(a.body);
+        case 'stopTimer': return api.me.stopTimer();
+        case 'submitWeek': return api.me.submitWeek(a.weekStart);
+      }
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['me'] });
+      void qc.invalidateQueries({ queryKey: ['people'] });
+      void qc.invalidateQueries({ queryKey: ['dashboard'] });
     },
   });
 }

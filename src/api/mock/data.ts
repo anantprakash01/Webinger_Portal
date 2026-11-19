@@ -469,6 +469,8 @@ export interface TaskRow {
   files: TaskFile[];
   comments: TaskComment[];
   createdAt: string;
+  /** When it reached Done (Week 6 on-time measure). Seeded Done tasks without it count as done on their due date. */
+  completedAt?: string;
 }
 
 let seq = 0;

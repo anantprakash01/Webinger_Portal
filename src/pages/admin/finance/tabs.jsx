@@ -68,7 +68,7 @@ export function InvoicesTab({ params, set }) {
         <Select label="Status" hideLabel value={q.status} onChange={(v) => set('status', v)} allLabel="Any status" options={INVOICE_STATUS_OPTIONS} />
         <Select label="Client" hideLabel value={q.clientId} onChange={(v) => set('clientId', v)} allLabel="All clients" options={clientOptions} />
         {filtered && (
-          <Button variant="ghost" size="sm" onClick={() => (setText(''), set('status', undefined), set('clientId', undefined), set('q', undefined))}>
+          <Button variant="ghost" size="sm" onClick={() => (setText(''), set('clear', 'invoices'))}>
             <LuX aria-hidden /> Clear
           </Button>
         )}

@@ -39,6 +39,8 @@ import { previewsFor } from './chat';
 import { accountManagerOf } from './clients';
 import { balanceOf, daysLateOf, invoiceSummary, recurringRevenue, unpaidInvoices, invoicedThisMonth } from './finance';
 import { latestResults } from './reports';
+import { dashboardPipeline } from './pipeline';
+import { dashboardScorecard, teamLoad } from './people';
 import {
   approvals,
   CLIENT_NAME,
@@ -186,17 +188,9 @@ export function adminDashboard(user: User): AdminDashboard {
       .slice(0, 6)
       .map(toSummary),
     overdueInvoices: overdue.map(invoiceSummary),
-    teamLoad: [
-      { name: 'Priya Sharma', department: 'Social', assignedHours: 44, capacityHours: 40 },
-      { name: 'Rahul Nair', department: 'SEO', assignedHours: 31, capacityHours: 40 },
-      { name: 'Meera Pillai', department: 'Design', assignedHours: 38, capacityHours: 40 },
-      { name: 'Vikram Singh', department: 'Ads', assignedHours: 22, capacityHours: 40 },
-    ],
-    pipeline: [
-      { stage: 'New', count: 9, value: 410000 },
-      { stage: 'Proposal sent', count: 4, value: 265000 },
-      { stage: 'Negotiation', count: 2, value: 180000 },
-    ],
+    // Week 6: planned hours this week from open tasks, and the live sales pipeline.
+    teamLoad: teamLoad(),
+    pipeline: dashboardPipeline(),
     waitingOnYou:
       user.role === 'SUPER_ADMIN'
         ? [
@@ -257,7 +251,8 @@ export function employeeDashboard(user: User): EmployeeDashboard {
     thisWeek: mine.filter((t) => t.due > day(0) && t.due <= day(7)).map(toTaskItem),
     reviewQueue: tasks.filter((t) => t.reviewerId === user.id && t.status === 'IN_REVIEW').map(toTaskItem),
     messages: previewsFor(user),
-    scorecard: { onTimeRate: 92, firstPassQuality: 78, clientRating: 4.6, hoursLogged: 31, hoursCapacity: 40 },
+    // Week 6: the same measures as My performance; hours from the timesheet.
+    scorecard: dashboardScorecard(user),
     announcements: [
       { id: 'n1', title: 'Office closed on 25 December', at: day(-1) },
       { id: 'n2', title: 'New brand vault rules: always use the latest logo file', at: day(-4) },
@@ -504,6 +499,7 @@ export function patchTask(user: User, id: string, patch: TaskPatch): TaskDetail 
     // BACKEND: "With client" always goes through sendToClient, so an approval version exists for the client to act on.
     if (patch.status === 'CLIENT_APPROVAL' && t.clientFacing) sendToClient(t, user);
     else t.status = patch.status;
+    t.completedAt = t.status === 'DONE' ? day(0) : undefined;
   }
   if (patch.assigneeId !== undefined && patch.assigneeId !== t.assigneeId) {
     t.assigneeId = patch.assigneeId;
@@ -589,7 +585,10 @@ export function reviewTask(user: User, id: string, input: ReviewInput): TaskDeta
     if (note) comment(`Review passed: ${note}`);
     log(t.projectId, user, `Passed internal review on "${t.title}"`);
     if (t.clientFacing) sendToClient(t, user);
-    else t.status = 'DONE';
+    else {
+      t.status = 'DONE';
+      t.completedAt = day(0);
+    }
   } else {
     comment(`Sent back: ${note}`);
     t.status = 'IN_PROGRESS';

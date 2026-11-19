@@ -1095,3 +1095,298 @@ export interface ReportInput {
   summary: string;
   sections: Array<{ service: string; highlight?: string; values: Record<string, number | null> }>;
 }
+
+/* ---------- Week 6: sales pipeline ---------- */
+
+export type LeadStage = 'NEW' | 'CONTACTED' | 'PROPOSAL' | 'NEGOTIATION' | 'WON' | 'LOST';
+export type LeadSource = 'WEBSITE' | 'REFERRAL' | 'OFFER' | 'EVENT' | 'OUTBOUND';
+export type LeadActivityKind = 'CALL' | 'EMAIL' | 'MEETING' | 'NOTE' | 'STAGE' | 'SYSTEM';
+
+export interface LeadActivity {
+  id: string;
+  at: string;
+  actor: string;
+  kind: LeadActivityKind;
+  text: string;
+}
+
+export interface LeadItem {
+  id: string;
+  company: string;
+  contactName: string;
+  city?: string;
+  source: LeadSource;
+  services: string[];
+  /** INR before GST; monthly for retainers. */
+  value: number;
+  valueKind: 'MONTHLY' | 'ONE_OFF';
+  stage: LeadStage;
+  owner?: { id: string; name: string };
+  nextFollowUp?: string;
+  /** Follow-up date is today or past (automation rule 1: day 1, 3, 7). */
+  followUpDue: boolean;
+  createdAt: string;
+  daysInStage: number;
+  lostReason?: string;
+  clientId?: string;
+}
+
+export interface LeadDetail extends LeadItem {
+  email: string;
+  phone?: string;
+  notes?: string;
+  projectId?: string;
+  activities: LeadActivity[];
+}
+
+export interface PipelineSummary {
+  stages: Array<{ stage: LeadStage; count: number; value: number }>;
+  openValue: number;
+  /** Open value × stage probability (New 10%, Contacted 20%, Proposal 40%, Negotiation 70%). */
+  weightedValue: number;
+  /** Won ÷ (won + lost), last 180 days. */
+  winRate?: number;
+  wonThisMonth: { count: number; value: number };
+  followUpsDue: number;
+  unassigned: number;
+}
+
+export interface PipelineBoard {
+  leads: LeadItem[];
+  summary: PipelineSummary;
+  /** Who can own a lead: active Super Admins and Managers. */
+  sellers: Array<{ id: string; name: string }>;
+}
+
+export interface NewLead {
+  company: string;
+  contactName: string;
+  email: string;
+  phone?: string;
+  city?: string;
+  source: LeadSource;
+  services: string[];
+  value: number;
+  valueKind: 'MONTHLY' | 'ONE_OFF';
+  ownerId?: string;
+  notes?: string;
+}
+
+export interface LeadPatch {
+  /** WON only through POST /pipeline/leads/{id}/convert. LOST needs lostReason. */
+  stage?: Exclude<LeadStage, 'WON'>;
+  ownerId?: string;
+  nextFollowUp?: string;
+  value?: number;
+  services?: string[];
+  lostReason?: string;
+}
+
+export interface LeadActivityInput {
+  kind: 'CALL' | 'EMAIL' | 'MEETING' | 'NOTE';
+  text: string;
+  nextFollowUp?: string;
+}
+
+export interface ConvertLead {
+  legalName: string;
+  industry: string;
+  city: string;
+  gstin?: string;
+  accountManagerId: string;
+  ownerTitle?: string;
+  project: { name: string; service: string; ownerId: string; budgetHours: number; startDate: string };
+}
+
+/* ---------- Week 6: people, attendance, leave ---------- */
+
+export type AttendanceStatus = 'PRESENT' | 'WFH' | 'LEAVE' | 'ABSENT' | 'HOLIDAY' | 'OFF' | 'UPCOMING';
+export type LeaveType = 'CASUAL' | 'SICK' | 'EARNED' | 'UNPAID';
+export type LeaveStatus = 'PENDING' | 'APPROVED' | 'DECLINED' | 'CANCELLED';
+
+export interface AttendanceDay {
+  date: string;
+  status: AttendanceStatus;
+  checkIn?: string;
+  checkOut?: string;
+  holiday?: string;
+}
+
+export interface PersonItem {
+  id: string;
+  name: string;
+  title?: string;
+  role: Role;
+  department: string;
+  status: AccountStatus;
+  today: AttendanceDay;
+  /** Logged this week, hours. */
+  loggedHours: number;
+  plannedHours: number;
+  capacityHours: number;
+  openTasks: number;
+  overdueTasks: number;
+  /** Next approved leave starting within 14 days. */
+  nextLeave?: { from: string; to: string };
+}
+
+export interface AttendanceWeek {
+  weekStart: string;
+  days: string[];
+  people: Array<{ id: string; name: string; department: string; days: AttendanceDay[] }>;
+}
+
+export interface AffectedTask {
+  id: string;
+  title: string;
+  due: string;
+  projectName: string;
+  /** Least-loaded colleague in the same department who is not away that day. */
+  suggested?: { id: string; name: string };
+}
+
+export interface LeaveRequest {
+  id: string;
+  userId: string;
+  userName: string;
+  department: string;
+  type: LeaveType;
+  from: string;
+  to: string;
+  /** Working days, holidays excluded. */
+  days: number;
+  reason: string;
+  status: LeaveStatus;
+  createdAt: string;
+  decidedBy?: string;
+  decidedAt?: string;
+  note?: string;
+  /** Pending requests only, for the approver (automation rule 13). */
+  affectedTasks?: AffectedTask[];
+}
+
+export interface LeaveBalance {
+  type: LeaveType;
+  allowance: number;
+  used: number;
+  pending: number;
+  left: number;
+}
+
+export interface MyLeave {
+  balances: LeaveBalance[];
+  requests: LeaveRequest[];
+  holidays: Array<{ date: string; name: string }>;
+}
+
+export interface NewLeave {
+  type: LeaveType;
+  from: string;
+  to: string;
+  reason: string;
+}
+
+export interface LeaveDecisionInput {
+  decision: 'APPROVE' | 'DECLINE';
+  note?: string;
+  /** taskId → new assignee, applied when approving. */
+  reassign?: Record<string, string>;
+}
+
+export interface MyAttendance {
+  today: AttendanceDay;
+  month: AttendanceDay[];
+  summary: { present: number; wfh: number; leave: number; absent: number };
+}
+
+export interface WorkloadRow {
+  id: string;
+  name: string;
+  department: string;
+  capacityHours: number;
+  leaveHours: number;
+  plannedHours: number;
+  loggedHours: number;
+  /** planned ÷ (capacity − leave). */
+  load: number;
+  timesheet: 'OPEN' | 'SUBMITTED';
+  tasks: Array<{ id: string; title: string; due: string; hours: number; projectName: string }>;
+}
+
+export interface Workload {
+  weekStart: string;
+  rows: WorkloadRow[];
+}
+
+export interface ScorePoint {
+  month: string;
+  onTimeRate?: number;
+  utilisation?: number;
+  firstPassQuality?: number;
+  clientRating?: number;
+}
+
+/** CLAUDE.md section 6: read these measures together, never one alone. */
+export interface Scorecard {
+  userId: string;
+  name: string;
+  department: string;
+  title?: string;
+  /** Last 30 days. */
+  onTimeRate?: number;
+  onTimeDone: number;
+  onTimeDue: number;
+  /** Tasks waiting on client approval: their clock is stopped. */
+  waitingOnClient: number;
+  utilisation?: number;
+  billableHours: number;
+  availableHours: number;
+  firstPassQuality?: number;
+  reviewed: number;
+  clientRating?: number;
+  responseMinutes?: number;
+  trend: ScorePoint[];
+  notes: string[];
+}
+
+/* ---------- Week 6: time tracking ---------- */
+
+export interface TimeEntry {
+  id: string;
+  date: string;
+  projectId: string;
+  projectName: string;
+  clientName: string;
+  taskId?: string;
+  taskTitle?: string;
+  minutes: number;
+  note?: string;
+  billable: boolean;
+  /** A running timer has no minutes yet. */
+  running?: boolean;
+  startedAt?: string;
+}
+
+export interface Timesheet {
+  weekStart: string;
+  days: string[];
+  status: 'OPEN' | 'SUBMITTED';
+  entries: TimeEntry[];
+  running?: TimeEntry;
+  totals: { minutes: number; billableMinutes: number; capacityMinutes: number };
+  projects: Array<{ id: string; name: string; clientName: string; tasks: Array<{ id: string; title: string }> }>;
+}
+
+export interface NewTimeEntry {
+  date: string;
+  projectId: string;
+  taskId?: string;
+  minutes: number;
+  note?: string;
+}
+
+export interface TimerStart {
+  projectId: string;
+  taskId?: string;
+  note?: string;
+}

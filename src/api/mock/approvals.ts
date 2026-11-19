@@ -95,7 +95,10 @@ export function decideApproval(user: User, id: string, input: ApprovalDecisionIn
     v.decision = { status: 'APPROVED', byName: user.name, at, note: note || undefined };
     a.status = 'APPROVED';
     if (d) d.status = 'APPROVED';
-    if (task) task.status = 'DONE';
+    if (task) {
+      task.status = 'DONE';
+      task.completedAt = new Date().toISOString().slice(0, 10);
+    }
     log(p.id, user, `Approved "${a.title}" (version ${v.number})`, 'CLIENT');
   } else {
     v.decision = { status: 'CHANGES_REQUESTED', byName: user.name, at, note };

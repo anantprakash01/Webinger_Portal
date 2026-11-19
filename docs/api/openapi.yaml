@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Webinger Portal API
-  version: 0.5.0
+  version: 0.6.0
   description: |
     Contract between the React frontend and the Spring Boot backend.
     Week 1 covers sign-in and one dashboard per portal area.
@@ -9,6 +9,8 @@ info:
     Week 3 adds approvals, internal review, the client team, user admin, settings and the auth flows.
     Week 4 adds messages, tickets, uploads and files. Live updates: Phase 0 polls GET .../messages;
     Phase 1 adds Spring WebSocket (STOMP) topics /topic/conversations/{id} and /user/queue/inbox with the same payloads.
+    0.6.0 adds the sales pipeline (won deal -> client + project), people (attendance, leave with task
+    handover, workload, scorecards) and self-service time tracking, leave and attendance under /me.
     0.5.0 adds finance (invoices with GST, quotes, payments with TDS, expenses, profit, CA export),
     client billing (pay, accept or decline quotes) and monthly client reports.
     0.4.1 adds the admin clients module (list, detail with health score, create, edit, notes).
@@ -37,6 +39,11 @@ info:
         payment gateway's signed webhook (Phase 2).
       - reports: /admin/reports is SUPER_ADMIN and MANAGER; /reports returns PUBLISHED months of the caller's
         organisation only, and reps only see services of projects they belong to.
+      - pipeline: /pipeline/* is SUPER_ADMIN and MANAGER; converting a won deal is SUPER_ADMIN only (it creates
+        a client login). A lead is owned by a Super Admin or Manager; one open lead per email.
+      - people: /people/* is SUPER_ADMIN and MANAGER (Phase 1: managers their teams). Nobody approves their own
+        leave; a manager's leave goes to a Super Admin. Cost rates and pay never appear in these responses.
+      - me: /me/* is staff only and always the caller's own data (attendance, leave, scorecard, time entries).
       - clients: /clients is SUPER_ADMIN and MANAGER only; creating a client (it issues a login)
         and changing a client's status are SUPER_ADMIN only; lifetimeValue is never sent to managers
 servers:
@@ -1542,6 +1549,428 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
 
+  /pipeline:
+    get:
+      tags: [pipeline]
+      summary: 'Lead board, summary and the people who can own leads'
+      description: |
+        Won and lost deals older than 90 days drop off. Follow-ups due sort first.
+      parameters:
+        - { name: q, in: query, schema: { type: string }, description: 'Company, contact, city or service' }
+        - { name: ownerId, in: query, schema: { type: string }, description: 'A user id, or none for unassigned' }
+        - { name: source, in: query, schema: { $ref: '#/components/schemas/LeadSource' } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PipelineBoard' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /pipeline/leads:
+    post:
+      tags: [pipeline]
+      summary: 'Add a lead (first follow-up tomorrow)'
+      description: |
+        409 when an open lead already has this email. Automation rule 1 creates leads from the website form and offer clicks.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NewLead' }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LeadDetail' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /pipeline/leads/{id}:
+    get:
+      tags: [pipeline]
+      summary: 'Lead with activity history'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LeadDetail' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+    patch:
+      tags: [pipeline]
+      summary: 'Move stage, change owner, follow-up, value or services'
+      description: |
+        WON only through /convert. LOST needs lostReason. Won deals are closed (409).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LeadPatch' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LeadDetail' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /pipeline/leads/{id}/activities:
+    post:
+      tags: [pipeline]
+      summary: 'Log a call, email, meeting or note'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LeadActivityInput' }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LeadDetail' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /pipeline/leads/{id}/convert:
+    post:
+      tags: [pipeline]
+      summary: 'Mark as won: create the client, invite the contact, start the first project'
+      description: |
+        SUPER_ADMIN only. One transaction through the same service as POST /clients (duplicate name or email -> 409,
+        the lead stays open), then the project, then the lead is WON (automation rules 2 and 3).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConvertLead' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LeadDetail' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /people:
+    get:
+      tags: [people]
+      summary: 'Staff with today''s attendance, this week''s load and upcoming leave'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/PersonItem' } }
+        '403': { $ref: '#/components/responses/Problem' }
+  /people/attendance:
+    get:
+      tags: [people]
+      summary: 'Attendance grid for one week'
+      description: |
+        Derived per day: holiday, weekly off, approved leave, check-in (office or home), else ABSENT for past working days.
+      parameters:
+        - { name: week, in: query, schema: { type: string, format: date }, description: 'Any day of the week (Monday start); default this week' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AttendanceWeek' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /people/leave:
+    get:
+      tags: [people]
+      summary: 'Leave requests; pending ones list the tasks due while away'
+      parameters:
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/LeaveStatus' } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/LeaveRequest' } }
+        '403': { $ref: '#/components/responses/Problem' }
+  /people/leave/{id}/decision:
+    post:
+      tags: [people]
+      summary: 'Approve (optionally handing over tasks) or decline'
+      description: |
+        403 for your own leave, and for a manager's leave unless you are a Super Admin. Decline needs a note.
+        Handover targets must be active staff who are not away that day; each handover is logged on the project (rule 13).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LeaveDecisionInput' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LeaveRequest' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /people/workload:
+    get:
+      tags: [people]
+      summary: 'Planned vs available hours per person for one week'
+      description: |
+        Planned = open tasks due that week (overdue included), 6/4/2 h by priority until tasks carry an estimate; work waiting
+        on the client is excluded. Available = working days x 8 h minus approved leave.
+      parameters:
+        - { name: week, in: query, schema: { type: string, format: date }, description: 'Any day of the week (Monday start); default this week' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Workload' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /people/scorecards:
+    get:
+      tags: [people]
+      summary: 'Scorecards for the team (last 30 days)'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Scorecard' } }
+        '403': { $ref: '#/components/responses/Problem' }
+  /people/{id}/scorecard:
+    get:
+      tags: [people]
+      summary: 'One scorecard with a six-month trend'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Scorecard' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /me/attendance:
+    get:
+      tags: [me]
+      summary: 'Today and this month'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MyAttendance' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /me/attendance/check-in:
+    post:
+      tags: [me]
+      summary: 'Check in (office or home), once a day'
+      description: |
+        409 on a weekly off or holiday, on approved leave, or when already checked in.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [mode], properties: { mode: { type: string, enum: [OFFICE, WFH] } } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MyAttendance' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /me/attendance/check-out:
+    post:
+      tags: [me]
+      summary: 'Check out'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MyAttendance' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /me/leave:
+    get:
+      tags: [me]
+      summary: 'Balances, requests and coming holidays'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MyLeave' }
+        '403': { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [me]
+      summary: 'Apply for leave'
+      description: |
+        Working days only (Settings business days, holidays excluded). Sick leave up to 7 days back; others from today.
+        Max 20 working days, 6 months ahead. 409 on overlap or not enough balance (unpaid has no cap).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NewLeave' }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LeaveRequest' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /me/leave/{id}/cancel:
+    post:
+      tags: [me]
+      summary: 'Cancel a pending request, or approved leave that has not started'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LeaveRequest' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /me/performance:
+    get:
+      tags: [me]
+      summary: 'Your own scorecard'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Scorecard' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /me/timesheet:
+    get:
+      tags: [me]
+      summary: 'One week of your time, the running timer and your projects'
+      parameters:
+        - { name: week, in: query, schema: { type: string, format: date }, description: 'Any day of the week (Monday start); default this week' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Timesheet' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /me/timesheet/submit:
+    post:
+      tags: [me]
+      summary: 'Submit (lock) a week'
+      description: |
+        409 when already submitted or a timer is running; 400 when nothing is logged. Phase 2 adds manager approval.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [weekStart], properties: { weekStart: { type: string, format: date } } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Timesheet' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /me/time-entries:
+    post:
+      tags: [me]
+      summary: 'Add time manually'
+      description: |
+        Only on active projects you work on; 5 min to 12 h per entry, 16 h a day; not in the future or more than 30 days back;
+        409 in a submitted week. Hours add to the project (80% and 100% budget alerts, rule 14).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NewTimeEntry' }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TimeEntry' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /me/time-entries/{id}:
+    delete:
+      tags: [me]
+      summary: 'Delete one of your entries'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Done }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /me/timer/start:
+    post:
+      tags: [me]
+      summary: 'Start the timer (one at a time; the server keeps the start time)'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TimerStart' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TimeEntry' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /me/timer/stop:
+    post:
+      tags: [me]
+      summary: 'Stop the timer and log it'
+      description: |
+        Under a minute is discarded (response null); over 10 hours is capped with a note.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TimeEntry' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+
 components:
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
@@ -2769,3 +3198,327 @@ components:
               service: { type: string }
               highlight: { type: string, maxLength: 280 }
               values: { type: object, additionalProperties: { type: number, nullable: true } }
+
+    # ---------- Pipeline, people, time (0.6.0) ----------
+    LeadStage: { type: string, enum: [NEW, CONTACTED, PROPOSAL, NEGOTIATION, WON, LOST] }
+    LeadSource: { type: string, enum: [WEBSITE, REFERRAL, OFFER, EVENT, OUTBOUND] }
+    LeadActivity:
+      type: object
+      required: [id, at, actor, kind, text]
+      properties:
+        id: { type: string }
+        at: { type: string, format: date-time }
+        actor: { type: string }
+        kind: { type: string, enum: [CALL, EMAIL, MEETING, NOTE, STAGE, SYSTEM] }
+        text: { type: string }
+    LeadItem:
+      type: object
+      required: [id, company, contactName, source, services, value, valueKind, stage, followUpDue, createdAt, daysInStage]
+      properties:
+        id: { type: string }
+        company: { type: string }
+        contactName: { type: string }
+        city: { type: string }
+        source: { $ref: '#/components/schemas/LeadSource' }
+        services: { type: array, items: { type: string } }
+        value: { type: number, description: 'INR before GST; monthly for retainers' }
+        valueKind: { type: string, enum: [MONTHLY, ONE_OFF] }
+        stage: { $ref: '#/components/schemas/LeadStage' }
+        owner: { $ref: '#/components/schemas/IdName' }
+        nextFollowUp: { type: string, format: date }
+        followUpDue: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        daysInStage: { type: integer }
+        lostReason: { type: string }
+        clientId: { type: string }
+    LeadDetail:
+      allOf:
+        - $ref: '#/components/schemas/LeadItem'
+        - type: object
+          required: [email, activities]
+          properties:
+            email: { type: string }
+            phone: { type: string }
+            notes: { type: string }
+            projectId: { type: string }
+            activities: { type: array, items: { $ref: '#/components/schemas/LeadActivity' }, description: Newest first }
+    PipelineSummary:
+      type: object
+      required: [stages, openValue, weightedValue, wonThisMonth, followUpsDue, unassigned]
+      properties:
+        stages: { type: array, items: { type: object, properties: { stage: { $ref: '#/components/schemas/LeadStage' }, count: { type: integer }, value: { type: number } } } }
+        openValue: { type: number }
+        weightedValue: { type: number, description: 'New 10%, Contacted 20%, Proposal 40%, Negotiation 70%' }
+        winRate: { type: number, description: 'Won / (won + lost), last 180 days' }
+        wonThisMonth: { type: object, properties: { count: { type: integer }, value: { type: number } } }
+        followUpsDue: { type: integer }
+        unassigned: { type: integer }
+    PipelineBoard:
+      type: object
+      required: [leads, summary, sellers]
+      properties:
+        leads: { type: array, items: { $ref: '#/components/schemas/LeadItem' } }
+        summary: { $ref: '#/components/schemas/PipelineSummary' }
+        sellers: { type: array, items: { $ref: '#/components/schemas/IdName' } }
+    NewLead:
+      type: object
+      required: [company, contactName, email, source, services, value, valueKind]
+      properties:
+        company: { type: string }
+        contactName: { type: string }
+        email: { type: string, format: email }
+        phone: { type: string }
+        city: { type: string }
+        source: { $ref: '#/components/schemas/LeadSource' }
+        services: { type: array, minItems: 1, items: { type: string } }
+        value: { type: number, minimum: 0 }
+        valueKind: { type: string, enum: [MONTHLY, ONE_OFF] }
+        ownerId: { type: string }
+        notes: { type: string }
+    LeadPatch:
+      type: object
+      properties:
+        stage: { type: string, enum: [NEW, CONTACTED, PROPOSAL, NEGOTIATION, LOST] }
+        ownerId: { type: string, description: Empty string removes the owner }
+        nextFollowUp: { type: string, format: date }
+        value: { type: number }
+        services: { type: array, items: { type: string } }
+        lostReason: { type: string }
+    LeadActivityInput:
+      type: object
+      required: [kind, text]
+      properties:
+        kind: { type: string, enum: [CALL, EMAIL, MEETING, NOTE] }
+        text: { type: string, minLength: 2, maxLength: 2000 }
+        nextFollowUp: { type: string, format: date }
+    ConvertLead:
+      type: object
+      required: [legalName, industry, city, accountManagerId, project]
+      properties:
+        legalName: { type: string }
+        industry: { type: string }
+        city: { type: string }
+        gstin: { type: string }
+        accountManagerId: { type: string }
+        ownerTitle: { type: string }
+        project:
+          type: object
+          required: [name, service, ownerId, budgetHours, startDate]
+          properties:
+            name: { type: string }
+            service: { type: string }
+            ownerId: { type: string }
+            budgetHours: { type: integer, minimum: 1, maximum: 2000 }
+            startDate: { type: string, format: date }
+    AttendanceStatus: { type: string, enum: [PRESENT, WFH, LEAVE, ABSENT, HOLIDAY, OFF, UPCOMING] }
+    AttendanceDay:
+      type: object
+      required: [date, status]
+      properties:
+        date: { type: string, format: date }
+        status: { $ref: '#/components/schemas/AttendanceStatus' }
+        checkIn: { type: string, description: 'HH:mm, IST' }
+        checkOut: { type: string }
+        holiday: { type: string }
+    PersonItem:
+      type: object
+      required: [id, name, role, department, status, today, loggedHours, plannedHours, capacityHours, openTasks, overdueTasks]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        title: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        department: { type: string }
+        status: { $ref: '#/components/schemas/AccountStatus' }
+        today: { $ref: '#/components/schemas/AttendanceDay' }
+        loggedHours: { type: number }
+        plannedHours: { type: number }
+        capacityHours: { type: number }
+        openTasks: { type: integer }
+        overdueTasks: { type: integer }
+        nextLeave: { type: object, properties: { from: { type: string, format: date }, to: { type: string, format: date } } }
+    AttendanceWeek:
+      type: object
+      required: [weekStart, days, people]
+      properties:
+        weekStart: { type: string, format: date }
+        days: { type: array, items: { type: string, format: date } }
+        people:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              name: { type: string }
+              department: { type: string }
+              days: { type: array, items: { $ref: '#/components/schemas/AttendanceDay' } }
+    LeaveType: { type: string, enum: [CASUAL, SICK, EARNED, UNPAID] }
+    LeaveStatus: { type: string, enum: [PENDING, APPROVED, DECLINED, CANCELLED] }
+    AffectedTask:
+      type: object
+      required: [id, title, due, projectName]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        due: { type: string, format: date }
+        projectName: { type: string }
+        suggested: { $ref: '#/components/schemas/IdName' }
+    LeaveRequest:
+      type: object
+      required: [id, userId, userName, department, type, from, to, days, reason, status, createdAt]
+      properties:
+        id: { type: string }
+        userId: { type: string }
+        userName: { type: string }
+        department: { type: string }
+        type: { $ref: '#/components/schemas/LeaveType' }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        days: { type: integer, description: Working days }
+        reason: { type: string }
+        status: { $ref: '#/components/schemas/LeaveStatus' }
+        createdAt: { type: string, format: date-time }
+        decidedBy: { type: string }
+        decidedAt: { type: string, format: date-time }
+        note: { type: string }
+        affectedTasks: { type: array, items: { $ref: '#/components/schemas/AffectedTask' }, description: 'Pending requests, admin area only' }
+    LeaveBalance:
+      type: object
+      required: [type, allowance, used, pending, left]
+      properties:
+        type: { $ref: '#/components/schemas/LeaveType' }
+        allowance: { type: integer }
+        used: { type: integer }
+        pending: { type: integer }
+        left: { type: integer }
+    MyLeave:
+      type: object
+      required: [balances, requests, holidays]
+      properties:
+        balances: { type: array, items: { $ref: '#/components/schemas/LeaveBalance' } }
+        requests: { type: array, items: { $ref: '#/components/schemas/LeaveRequest' } }
+        holidays: { type: array, items: { type: object, properties: { date: { type: string, format: date }, name: { type: string } } } }
+    NewLeave:
+      type: object
+      required: [type, from, to, reason]
+      properties:
+        type: { $ref: '#/components/schemas/LeaveType' }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        reason: { type: string, minLength: 3 }
+    LeaveDecisionInput:
+      type: object
+      required: [decision]
+      properties:
+        decision: { type: string, enum: [APPROVE, DECLINE] }
+        note: { type: string }
+        reassign: { type: object, additionalProperties: { type: string }, description: 'taskId -> new assignee id' }
+    MyAttendance:
+      type: object
+      required: [today, month, summary]
+      properties:
+        today: { $ref: '#/components/schemas/AttendanceDay' }
+        month: { type: array, items: { $ref: '#/components/schemas/AttendanceDay' } }
+        summary: { type: object, properties: { present: { type: integer }, wfh: { type: integer }, leave: { type: integer }, absent: { type: integer } } }
+    WorkloadRow:
+      type: object
+      required: [id, name, department, capacityHours, leaveHours, plannedHours, loggedHours, load, timesheet, tasks]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        department: { type: string }
+        capacityHours: { type: number }
+        leaveHours: { type: number }
+        plannedHours: { type: number }
+        loggedHours: { type: number }
+        load: { type: number, description: 'planned / (capacity - leave)' }
+        timesheet: { type: string, enum: [OPEN, SUBMITTED] }
+        tasks: { type: array, items: { type: object, properties: { id: { type: string }, title: { type: string }, due: { type: string, format: date }, hours: { type: number }, projectName: { type: string } } } }
+    Workload:
+      type: object
+      required: [weekStart, rows]
+      properties:
+        weekStart: { type: string, format: date }
+        rows: { type: array, items: { $ref: '#/components/schemas/WorkloadRow' } }
+    ScorePoint:
+      type: object
+      required: [month]
+      properties:
+        month: { type: string }
+        onTimeRate: { type: number }
+        utilisation: { type: number }
+        firstPassQuality: { type: number }
+        clientRating: { type: number }
+    Scorecard:
+      type: object
+      required: [userId, name, department, onTimeDone, onTimeDue, waitingOnClient, billableHours, availableHours, reviewed, trend, notes]
+      properties:
+        userId: { type: string }
+        name: { type: string }
+        title: { type: string }
+        department: { type: string }
+        onTimeRate: { type: number, description: 'Done by due / fell due, last 30 days; tasks with the client excluded' }
+        onTimeDone: { type: integer }
+        onTimeDue: { type: integer }
+        waitingOnClient: { type: integer }
+        utilisation: { type: number, description: 'Billable / available hours' }
+        billableHours: { type: number }
+        availableHours: { type: number }
+        firstPassQuality: { type: number }
+        reviewed: { type: integer }
+        clientRating: { type: number }
+        responseMinutes: { type: number }
+        trend: { type: array, items: { $ref: '#/components/schemas/ScorePoint' }, description: '5 saved monthly snapshots + this month' }
+        notes: { type: array, items: { type: string } }
+    TimeEntry:
+      type: object
+      required: [id, date, projectId, projectName, clientName, minutes, billable]
+      properties:
+        id: { type: string }
+        date: { type: string, format: date }
+        projectId: { type: string }
+        projectName: { type: string }
+        clientName: { type: string }
+        taskId: { type: string }
+        taskTitle: { type: string }
+        minutes: { type: integer }
+        note: { type: string }
+        billable: { type: boolean }
+        running: { type: boolean }
+        startedAt: { type: string, format: date-time }
+    Timesheet:
+      type: object
+      required: [weekStart, days, status, entries, totals, projects]
+      properties:
+        weekStart: { type: string, format: date }
+        days: { type: array, items: { type: string, format: date } }
+        status: { type: string, enum: [OPEN, SUBMITTED] }
+        entries: { type: array, items: { $ref: '#/components/schemas/TimeEntry' } }
+        running: { $ref: '#/components/schemas/TimeEntry' }
+        totals: { type: object, properties: { minutes: { type: integer }, billableMinutes: { type: integer }, capacityMinutes: { type: integer } } }
+        projects:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              name: { type: string }
+              clientName: { type: string }
+              tasks: { type: array, items: { $ref: '#/components/schemas/IdTitle' } }
+    IdTitle: { type: object, properties: { id: { type: string }, title: { type: string } } }
+    NewTimeEntry:
+      type: object
+      required: [date, projectId, minutes]
+      properties:
+        date: { type: string, format: date }
+        projectId: { type: string }
+        taskId: { type: string }
+        minutes: { type: integer, minimum: 5, maximum: 720 }
+        note: { type: string }
+    TimerStart:
+      type: object
+      required: [projectId]
+      properties:
+        projectId: { type: string }
+        taskId: { type: string }
+        note: { type: string }
