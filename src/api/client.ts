@@ -20,6 +20,27 @@ import type {
   Availability,
   ChatMessage,
   BillingOverview,
+  AttendanceWeek,
+  ConvertLead,
+  LeadActivityInput,
+  LeadDetail,
+  LeadPatch,
+  LeadSource,
+  LeaveDecisionInput,
+  LeaveRequest,
+  LeaveStatus,
+  MyAttendance,
+  MyLeave,
+  NewLead,
+  NewLeave,
+  NewTimeEntry,
+  PersonItem,
+  PipelineBoard,
+  Scorecard,
+  TimeEntry,
+  Timesheet,
+  TimerStart,
+  Workload,
   ClientReport,
   ExpenseItem,
   ExportFile,
@@ -91,6 +112,9 @@ import * as clientsMock from './mock/clients';
 import * as files from './mock/files';
 import * as finance from './mock/finance';
 import * as reportsMock from './mock/reports';
+import * as peopleMock from './mock/people';
+import * as pipelineMock from './mock/pipeline';
+import * as timesheetMock from './mock/timesheet';
 import * as mock from './mock/handlers';
 
 const MODE = (import.meta.env.VITE_API_MODE ?? 'mock') as 'mock' | 'http';
@@ -476,6 +500,50 @@ export const api = {
       isMock
         ? fromMock((u) => reportsMock.publishReport(u, clientId, month))
         : http<ClientReport>(`/admin/reports/${enc(clientId)}/${enc(month)}/publish`, json('POST', {})),
+  },
+  /** Week 6. Sales pipeline: admin area; converting a deal is SUPER_ADMIN only. */
+  pipeline: {
+    board: (q: { q?: string; ownerId?: string; source?: LeadSource } = {}) =>
+      isMock ? fromMock((u) => pipelineMock.pipeline(u, q)) : http<PipelineBoard>(`/pipeline${qs(q)}`),
+    lead: (id: string) => (isMock ? fromMock((u) => pipelineMock.getLead(u, id)) : http<LeadDetail>(`/pipeline/leads/${enc(id)}`)),
+    create: (body: NewLead) => (isMock ? fromMock((u) => pipelineMock.createLead(u, body)) : http<LeadDetail>('/pipeline/leads', json('POST', body))),
+    update: (id: string, patch: LeadPatch) =>
+      isMock ? fromMock((u) => pipelineMock.updateLead(u, id, patch)) : http<LeadDetail>(`/pipeline/leads/${enc(id)}`, json('PATCH', patch)),
+    addActivity: (id: string, body: LeadActivityInput) =>
+      isMock ? fromMock((u) => pipelineMock.addLeadActivity(u, id, body)) : http<LeadDetail>(`/pipeline/leads/${enc(id)}/activities`, json('POST', body)),
+    convert: (id: string, body: ConvertLead) =>
+      isMock ? fromMock((u) => pipelineMock.convertLead(u, id, body)) : http<LeadDetail>(`/pipeline/leads/${enc(id)}/convert`, json('POST', body)),
+  },
+  /** Week 6. People: admin area. */
+  people: {
+    list: () => (isMock ? fromMock(peopleMock.listPeople) : http<PersonItem[]>('/people')),
+    attendance: (week?: string) => (isMock ? fromMock((u) => peopleMock.attendanceWeek(u, week)) : http<AttendanceWeek>(`/people/attendance${qs({ week })}`)),
+    leave: (q: { status?: LeaveStatus } = {}) => (isMock ? fromMock((u) => peopleMock.listLeave(u, q)) : http<LeaveRequest[]>(`/people/leave${qs(q)}`)),
+    decideLeave: (id: string, body: LeaveDecisionInput) =>
+      isMock ? fromMock((u) => peopleMock.decideLeave(u, id, body)) : http<LeaveRequest>(`/people/leave/${enc(id)}/decision`, json('POST', body)),
+    workload: (week?: string) => (isMock ? fromMock((u) => peopleMock.workload(u, week)) : http<Workload>(`/people/workload${qs({ week })}`)),
+    scorecards: () => (isMock ? fromMock(peopleMock.scorecards) : http<Scorecard[]>('/people/scorecards')),
+    scorecard: (id: string) => (isMock ? fromMock((u) => peopleMock.personScorecard(u, id)) : http<Scorecard>(`/people/${enc(id)}/scorecard`)),
+  },
+  /** Week 6. The signed-in staff member's own attendance, leave, performance and time. */
+  me: {
+    attendance: () => (isMock ? fromMock(peopleMock.myAttendance) : http<MyAttendance>('/me/attendance')),
+    checkIn: (mode: 'OFFICE' | 'WFH') =>
+      isMock ? fromMock((u) => peopleMock.checkIn(u, mode)) : http<MyAttendance>('/me/attendance/check-in', json('POST', { mode })),
+    checkOut: () => (isMock ? fromMock(peopleMock.checkOut) : http<MyAttendance>('/me/attendance/check-out', json('POST', {}))),
+    leave: () => (isMock ? fromMock(peopleMock.myLeave) : http<MyLeave>('/me/leave')),
+    requestLeave: (body: NewLeave) => (isMock ? fromMock((u) => peopleMock.requestLeave(u, body)) : http<LeaveRequest>('/me/leave', json('POST', body))),
+    cancelLeave: (id: string) =>
+      isMock ? fromMock((u) => peopleMock.cancelLeave(u, id)) : http<LeaveRequest>(`/me/leave/${enc(id)}/cancel`, json('POST', {})),
+    performance: () => (isMock ? fromMock(peopleMock.myPerformance) : http<Scorecard>('/me/performance')),
+    timesheet: (week?: string) => (isMock ? fromMock((u) => timesheetMock.myTimesheet(u, week)) : http<Timesheet>(`/me/timesheet${qs({ week })}`)),
+    addTime: (body: NewTimeEntry) => (isMock ? fromMock((u) => timesheetMock.addTimeEntry(u, body)) : http<TimeEntry>('/me/time-entries', json('POST', body))),
+    deleteTime: (id: string) =>
+      isMock ? fromMock((u) => timesheetMock.deleteTimeEntry(u, id)) : http<void>(`/me/time-entries/${enc(id)}`, { method: 'DELETE' }),
+    startTimer: (body: TimerStart) => (isMock ? fromMock((u) => timesheetMock.startTimer(u, body)) : http<TimeEntry>('/me/timer/start', json('POST', body))),
+    stopTimer: () => (isMock ? fromMock(timesheetMock.stopTimer) : http<TimeEntry | null>('/me/timer/stop', json('POST', {}))),
+    submitWeek: (weekStart: string) =>
+      isMock ? fromMock((u) => timesheetMock.submitWeek(u, weekStart)) : http<Timesheet>('/me/timesheet/submit', json('POST', { weekStart })),
   },
   /** Prototype only: emails the mock would have sent, so invite and reset links can be opened. */
   demo: {

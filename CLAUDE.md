@@ -276,8 +276,8 @@ Week estimates assume one or two developers with AI assistance.
 | 4 | Messages and files | **Done** |
 | 4b | Admin clients (pulled forward from Week 6) | **Done** |
 | 5 | Finance, billing, client reports | **Done** |
-| 6 | Sales pipeline, people, performance | Next |
-| 7 | Influencer portal, partner portal, discovery | |
+| 6 | Sales pipeline, people, performance | **Done** |
+| 7 | Influencer portal, partner portal, discovery | Next |
 | 8 | Automation UI, knowledge base, polish, contract freeze | |
 
 ### Week 1 — Done
@@ -401,7 +401,25 @@ Original spec:
 - Client `/client/reports`: KPIs per service, month picker, print/PDF-friendly layout.
 - Admin metric entry screen for monthly client results.
 
-### Week 6 — Pipeline, people, performance
+### Week 6 — Pipeline, people, performance (Done, 2026-11-19)
+What was built (spec below kept for reference). Branch `week-6`.
+- Contract v0.6.0 (103 paths): `/pipeline`, `/pipeline/leads` (+ `/{id}`, `/activities`, `/convert`); `/people`, `/people/attendance`, `/people/leave` (+ `/{id}/decision`), `/people/workload`, `/people/scorecards`, `/people/{id}/scorecard`; `/me/attendance` (+ `/check-in`, `/check-out`), `/me/leave` (+ `/{id}/cancel`), `/me/performance`, `/me/timesheet` (+ `/submit`), `/me/time-entries` (+ `/{id}` DELETE), `/me/timer/start`, `/me/timer/stop`.
+- Mock modules: `pipeline.ts` (leads, stages, activities, won deal → client + project), `people.ts` (attendance, leave + handover, workload, scorecards), `timesheet.ts` (timer, entries, weekly submit, budget alerts), `data6.ts` (seed: 12 leads, departments, holidays, 45 days of attendance, leave, ~4 weeks of time entries, 5 monthly score snapshots per person). Tasks now carry `completedAt` (set when moved to Done, by review pass, or by client approval).
+- Rules the backend must copy (all marked `BACKEND:`):
+  - Pipeline: admin area. Leads are owned by a Super Admin or Manager; one open lead per email (409). Stages New → Contacted → Proposal sent → Negotiation → Won/Lost; LOST needs a reason; moving forward sets the next follow-up (rule 1 rhythm). **WON only via convert, SUPER_ADMIN only**: one transaction through the Add client service (same checks: duplicate name/email 409, GSTIN, invite email), first project (owner, service, budget hours, start date, kick-off milestone), lead WON with links. Weighted value uses New 10% / Contacted 20% / Proposal 40% / Negotiation 70%; win rate = won ÷ closed in 180 days.
+  - Attendance is derived per day: holiday → weekly off (Settings business days) → approved leave → check-in (office/home) → ABSENT for past working days. One check-in a day; none on leave or days off.
+  - Leave: casual 12, sick 8, earned 15 a year (unpaid uncapped); counts working days only; sick up to 7 days back, others from today; max 20 working days, 6 months ahead; overlap 409; balance includes pending. **Nobody approves their own leave; a manager's leave needs a Super Admin.** Approving shows the open tasks due while away (+ the next working day) with a suggested colleague (same department, lightest week, not away) and can hand them over in the same transaction, each logged on the project (rule 13). Decline needs a note. Cancel: pending, or approved before it starts.
+  - Time: staff only, own entries, only on active projects you work on; 5 min–12 h per entry, ≤16 h a day, not future, ≤30 days back; one running timer (server keeps the start), under 1 minute discarded, over 10 h capped. Entries add to the project's hours; crossing 80% / 100% of budget logs an alert on the project (rule 14). Submitting a week locks it (Phase 2: manager approval and reopen).
+  - Workload: planned = open tasks due that week (overdue included), 6/4/2 h by priority until tasks carry an estimate; tasks with the client are excluded. Available = working days × 8 − approved leave.
+  - Scorecards (section 6, last 30 days): on-time = done by due ÷ fell due, **tasks waiting on client approval excluded (clock stopped)**; utilisation = billable ÷ available hours; first-pass quality = reviewed without send-back ÷ reviewed; client rating = satisfaction of the clients they work for; response time seeded (Phase 1 from chat). Trend = saved monthly snapshots + live month. Paired-measure notes. Employees see only their own; admin area sees all. No cost rates or pay in any People response.
+  - Finance → Profit now costs time entries per person at their cost rate; older hours stay at the team average.
+  - Dashboards: admin "Team load" and "Pipeline", and the employee scorecard tiles are now live.
+- Screens: `/admin/pipeline` (stats, search/owner/source filters in the URL, six-column board with drag and a Move select, follow-up-due cards marked, lead drawer with stage/owner/follow-up, activity log, lost reason, "Mark as won" form for Super Admins, add lead), `/admin/people` (tabs: Team by department with today's status and weekly load; Attendance week grid; Leave queue with handover drawer; Workload with per-person tasks; Scorecards with a person drawer), `/employee/timesheet` (new nav item: timer with project/task, week navigator, project × day grid, entries with delete, add time, submit week), `/employee/leave` (check in/out, balances, requests with cancel, holidays, month grid, apply drawer), `/employee/performance` (four measures, notes, six-month trend).
+- Fixed along the way: closing a drawer that cleared two URL parameters with two updates left it open (the second update overwrote the first); Finance invoice "Clear" had the same bug. Absolutely positioned screen-reader labels inside sideways-scrolling areas widened phone pages; scroll containers are now `position: relative`.
+- Verified: build + typecheck pass; 100 new + 351 earlier access-rule checks pass; 40 browser checks in headless Edge (pipeline moves, lost reason, activity, won → client + project, add lead, manager can't win, People tabs, leave approval with handover, scorecard trend, employee kept out, check-in, leave request, timer, manual entry, submitted week locked, phone layouts without horizontal scroll); Week 3, 4, 5 and Clients browser suites pass.
+- Known limits: data lives in each tab's memory; no payroll inputs, reviews or timesheet approval yet (Phase 2); holidays are a fixed list; response time is seeded.
+
+Original spec:
 - Admin `/admin/pipeline`: kanban stages, lead detail, activities, convert won deal to client + project.
 - ~~Admin `/admin/clients` list + detail with health score.~~ Done early (see "Admin clients" above).
 - Admin `/admin/people`: departments, attendance, leave approvals, workload view, scorecards.
@@ -452,7 +470,8 @@ src/api/client.ts          only place that talks to a backend
 src/api/queries.ts         TanStack Query client, cache keys, hooks (reads + mutations)
 src/api/mock/              fake data + handlers (reference for backend access rules):
                            handlers.ts, approvals.ts, accounts.ts, chat.ts, files.ts,
-                           clients.ts, finance.ts, reports.ts, hours.ts, data.ts, data4.ts, data5.ts, art.ts
+                           clients.ts, finance.ts, reports.ts, pipeline.ts, people.ts, timesheet.ts,
+                           hours.ts, data.ts, data4.ts, data5.ts, data6.ts, art.ts
 src/auth/                  AuthContext, RequireArea guard
 src/components/ui/         base components and format helpers
 src/components/status.jsx  health, task, project, deliverable, priority, visibility badges
@@ -463,13 +482,14 @@ src/components/auth.jsx    auth layout, new-password fields, demo inbox
 src/components/chat.jsx    conversation list, thread, composer, response clock, hours banner
 src/components/finance.jsx printable invoice/quote document, line items editor, finance labels, CSV download
 src/components/reports.jsx metric tile, metric formatting and month-on-month change
+src/components/people.jsx  pipeline stages, attendance/leave badges, load bar, scorecard view
 src/pages/admin/finance/   finance tabs and forms used by AdminFinance
 src/api/realtime.ts        live-update transport (polling now, WebSocket in Phase 1)
 src/pages/shared/          screens shared by several areas (MessagesPage)
 src/components/Logo.jsx    placeholder wordmark
 src/layout/                AppShell, nav per role, shell.css
 src/pages/<area>/          screens per portal area
-src/styles/                tokens.css, global.css, work.css (Week 2), week3.css, week4.css, clients.css, finance.css
+src/styles/                tokens.css, global.css, work.css (Week 2), week3.css, week4.css, clients.css, finance.css, people.css
 ```
 
 ---
@@ -528,9 +548,9 @@ src/styles/                tokens.css, global.css, work.css (Week 2), week3.css,
 - [ ] CA review (GST invoice format, TDS) and lawyer review (privacy policy, agreements)
 
 ## 18. Current state and next action
-- Weeks 1–5 and Admin clients are done; `npm run build` passes. On a new machine: `npm install`, `cp .env.example .env`, `npm run dev`.
+- Weeks 1–6 and Admin clients are done; `npm run build` passes. On a new machine: `npm install`, `cp .env.example .env`, `npm run dev`.
 - Push to a private GitHub repo and connect Cloudflare Pages so reviewers see every push.
 - Git workflow: one branch per week from an up-to-date `main` (e.g. `week-5-finance`), pull request into `main`, merge, then start the next week. Never stack a week on an unmerged branch.
 - Week 5 can reuse: client records (`clients.ts`: legal name, GSTIN, address for GST invoices; contracts for recurring billing; `lifetimeValue` and `outstanding` should come from real invoices/payments), `files.ts` signed links for invoice PDFs, `hours.ts` for due dates, `DemoEmail` for invoice emails, ticket clocks for payment reminders.
-- Week 6 can reuse: `costRates` and `profitReport` (swap the average-rate costing for time entries), `reports.ts` metric templates for employee scorecards, quote acceptance (`acceptQuote`) as the model for "won deal → client + project".
-- **Next: merge the Clients and Week 5 PRs, then start Week 6 (pipeline, people, performance) as described in section 10.**
+- Week 7 can reuse: the pipeline's board and drawer for campaign stages, `people.ts` approval pattern (no self-approval, admin decides) for influencer verification and payouts, `timesheet.ts` style self-service under `/me`, `files.ts` for content submissions.
+- **Next: merge the Week 6 PR, then start Week 7 (influencers and partners) as described in section 10.**

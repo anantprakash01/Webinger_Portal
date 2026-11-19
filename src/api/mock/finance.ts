@@ -38,6 +38,7 @@ import type {
   User,
 } from '@/types';
 import { sendEmail } from './accounts';
+import { minutesByPerson } from './timesheet';
 import { clientRows, contractStatus } from './clients';
 import { CLIENT_NAME, day, nameOf, projects, users } from './data';
 import {
@@ -720,7 +721,11 @@ export function profitReport(user: User): ProfitReport {
       const staff = [...new Set([p.ownerId, ...p.memberIds])].filter((id) => costRates[id] !== undefined);
       const rate = staff.length ? staff.reduce((n, id) => n + costRates[id], 0) / staff.length : 500;
       const revenue = revenueByProject.get(p.id) ?? 0;
-      const labourCost = Math.round(p.hoursUsed * rate);
+      // Week 6: time entries are costed per person; hours from before the timesheet at the team's average rate.
+      const byPerson = minutesByPerson(p.id);
+      const loggedHours = Object.values(byPerson).reduce((n, m) => n + m, 0) / 60;
+      const entryCost = Object.entries(byPerson).reduce((n, [uid, m]) => n + (m / 60) * (costRates[uid] ?? rate), 0);
+      const labourCost = Math.round(entryCost + Math.max(0, p.hoursUsed - loggedHours) * rate);
       const directCost = direct.get(p.id) ?? 0;
       const profit = revenue - labourCost - directCost;
       return {

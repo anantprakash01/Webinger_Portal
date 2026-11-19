@@ -1,0 +1,87 @@
+/* ---------- Week 6: pipeline, people, time ---------- */
+
+/* Pipeline board: six columns */
+.board--6 { grid-template-columns: repeat(6, minmax(200px, 1fr)); }
+@media (max-width: 720px) { .board--6 { grid-template-columns: repeat(6, 82%); } }
+.board__card--due { border-left: 3px solid var(--danger); }
+.lead-title { margin: 0; font-size: var(--fs-lg); font-weight: 800; }
+.card-form { padding: var(--s-3); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
+
+/* Toggle chips (services, activity kind) */
+button.chip {
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  border-radius: var(--radius-pill);
+  padding: 6px 12px;
+  font: inherit;
+  font-size: var(--fs-sm);
+  min-height: 36px;
+  cursor: pointer;
+}
+button.chip:hover { background: var(--surface-2); }
+button.chip.chip--on { background: var(--ink); border-color: var(--ink); color: #fff; }
+
+/* Load bar */
+.load { display: flex; align-items: center; gap: var(--s-2); min-width: 140px; }
+.load__track { flex: 1; height: 8px; background: var(--surface-2); border-radius: 4px; overflow: hidden; }
+.load__bar { height: 100%; border-radius: 4px; background: var(--ink-2); }
+.load__bar--light { background: var(--border-strong); }
+.load__bar--ok { background: var(--ok); }
+.load__bar--full { background: var(--warn); }
+.load__bar--over { background: var(--danger); }
+.load__pct { font-size: var(--fs-xs); font-variant-numeric: tabular-nums; min-width: 38px; text-align: right; }
+.workload-tasks { margin-top: 6px; gap: 2px; }
+
+/* Attendance */
+.week-picker { gap: var(--s-2); align-items: center; }
+.table-scroll { overflow-x: auto; }
+.att-table td, .att-table th { white-space: nowrap; }
+.att-table { min-width: 620px; }
+.att-cell {
+  display: inline-grid;
+  place-items: center;
+  min-width: 34px;
+  height: 28px;
+  padding: 0 6px;
+  border-radius: 6px;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  background: var(--surface-2);
+  color: var(--ink-3);
+}
+.att-cell--present { background: var(--ok-soft); color: var(--ok); }
+.att-cell--wfh { background: var(--info-soft); color: var(--info); }
+.att-cell--leave { background: var(--warn-soft); color: var(--warn); }
+.att-cell--absent { background: var(--danger-soft); color: var(--danger); }
+.att-cell--upcoming { background: transparent; border: 1px dashed var(--border); }
+.att-month { display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); gap: var(--s-2); }
+.att-month__day { display: grid; justify-items: center; gap: 2px; }
+
+/* Scorecard */
+.score-notes { list-style: none; margin: 0; padding: 0; }
+.trend-table { min-width: 520px; }
+.trend-table__now { font-weight: 800; }
+/* Grid tables (trend, attendance week, timesheet) stay tables on phones and scroll sideways. */
+.grid-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.grid-table th { text-align: left; font-weight: 600; color: var(--ink-3); font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.04em; padding: var(--s-2) var(--s-3); border-bottom: 1px solid var(--border); }
+.grid-table td { padding: var(--s-3); border-bottom: 1px solid var(--border); vertical-align: middle; }
+.grid-table tr:last-child td { border-bottom: 0; }
+.grid-table th.num, .grid-table td.num { text-align: right; }
+.grid-table td:first-child, .grid-table th:first-child { position: sticky; left: 0; background: var(--surface); z-index: 1; }
+
+/* Timesheet */
+.timer { display: flex; align-items: center; justify-content: space-between; gap: var(--s-4); flex-wrap: wrap; }
+.timer--start { align-items: end; }
+.timer--start .field { flex: 1 1 220px; }
+.timer__clock { font-size: var(--fs-2xl); font-weight: 800; font-variant-numeric: tabular-nums; }
+.ts-grid { min-width: 720px; }
+.ts-grid td, .ts-grid th { white-space: nowrap; }
+.ts-grid__today { background: var(--surface-2); }
+.ts-grid__total td { font-weight: 700; border-top: 1px solid var(--border-strong); }
+
+/* Absolutely positioned helpers (sr-only labels) must stay inside sideways-scrolling areas. */
+.board, .table-scroll { position: relative; }
+/* Let wide tables scroll inside their card instead of stretching the grid around them. */
+.scorecard > *, .drawer__body > .grid > * { min-width: 0; }
+.board--6 .board__foot { flex-wrap: wrap; gap: 6px; }
+.lead-owner { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }

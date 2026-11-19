@@ -30,6 +30,8 @@ export function AdminFinance() {
     setParams(
       (prev) => {
         const next = new URLSearchParams(prev);
+        // 'clear' resets every filter of the current tab in one update (two separate updates would overwrite each other).
+        if (key === 'clear') return new URLSearchParams(value ? { tab: value } : {});
         if (value) next.set(key, String(value));
         else next.delete(key);
         return next;

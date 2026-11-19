@@ -14,6 +14,11 @@ import { AdminClients } from '@/pages/admin/AdminClients';
 import { AdminFinance } from '@/pages/admin/AdminFinance';
 import { AdminInvoice } from '@/pages/admin/AdminInvoice';
 import { AdminReports } from '@/pages/admin/AdminReports';
+import { AdminPeople } from '@/pages/admin/AdminPeople';
+import { AdminPipeline } from '@/pages/admin/AdminPipeline';
+import { EmployeeLeave } from '@/pages/employee/EmployeeLeave';
+import { EmployeePerformance } from '@/pages/employee/EmployeePerformance';
+import { EmployeeTimesheet } from '@/pages/employee/EmployeeTimesheet';
 import { ClientBilling } from '@/pages/client/ClientBilling';
 import { ClientInvoice } from '@/pages/client/ClientInvoice';
 import { ClientReports } from '@/pages/client/ClientReports';
@@ -62,6 +67,11 @@ const PAGES = {
   '/admin/reports': AdminReports,
   '/client/billing': ClientBilling,
   '/client/reports': ClientReports,
+  '/admin/pipeline': AdminPipeline,
+  '/admin/people': AdminPeople,
+  '/employee/timesheet': EmployeeTimesheet,
+  '/employee/performance': EmployeePerformance,
+  '/employee/leave': EmployeeLeave,
 };
 
 /**
