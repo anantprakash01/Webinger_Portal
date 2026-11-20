@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Webinger Portal API
-  version: 0.7.0
+  version: 1.0.0
   description: |
     Contract between the React frontend and the Spring Boot backend.
     Week 1 covers sign-in and one dashboard per portal area.
@@ -9,6 +9,9 @@ info:
     Week 3 adds approvals, internal review, the client team, user admin, settings and the auth flows.
     Week 4 adds messages, tickets, uploads and files. Live updates: Phase 0 polls GET .../messages;
     Phase 1 adds Spring WebSocket (STOMP) topics /topic/conversations/{id} and /user/queue/inbox with the same payloads.
+    1.0.0 (Core frozen, end of Phase 0): adds automation rules and run log, deputy mode, knowledge base,
+    service catalogue with project templates and client onboarding. From here every change is recorded in
+    docs/api/CHANGELOG.md with date, what and why, and the backend implements this file as written.
     0.7.0 adds creators (public sign-up with email verification, profile, verification, discovery,
     campaigns, payouts), the partner portal, the PR hub and the dashboard offer slot.
     0.6.0 adds the sales pipeline (won deal -> client + project), people (attendance, leave with task
@@ -55,6 +58,10 @@ info:
         partner invoice decisions SUPER_ADMIN only.
       - pr: GET /pr is staff (employees read); writes admin area; contact export SUPER_ADMIN only and logged.
       - offers: clients see at most one offer, for a service they don't buy; /offers management is admin area.
+      - automation: /automation/* read by SUPER_ADMIN and MANAGER; only SUPER_ADMIN changes rules, pauses all or sets
+        the deputy. Client-facing rules spend 30 days in DRAFT before ON. Drafts of invoice actions: SUPER_ADMIN only.
+      - knowledge: staff read; SUPER_ADMIN and MANAGER write. services: admin area; prices SUPER_ADMIN only.
+      - onboarding: client roles fill their own company's checklist (never passwords); staff mark access VERIFIED.
       - clients: /clients is SUPER_ADMIN and MANAGER only; creating a client (it issues a login)
         and changing a client's status are SUPER_ADMIN only; lifetimeValue is never sent to managers
 servers:
@@ -2811,6 +2818,359 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
 
+  /automation:
+    get:
+      tags: [automation]
+      summary: 'Rules, waiting drafts, pause state, deputy and the never-automated list'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AutomationOverview' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /automation/rules/{id}:
+    patch:
+      tags: [automation]
+      summary: 'Change mode, settings or actions (Super Admin)'
+      description: |
+        409 when a client-facing rule is switched ON before 30 days in DRAFT. Settings stay in range; at least one action stays on.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1, maximum: 18 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RulePatch' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AutomationRule' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /automation/rules/{id}/preview:
+    post:
+      tags: [automation]
+      summary: 'What the rule would do with today''s data (nothing is sent)'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, minimum: 1, maximum: 18 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, properties: { ruleId: { type: integer }, items: { type: array, items: { type: string } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /automation/pause:
+    post:
+      tags: [automation]
+      summary: 'Pause or resume every rule (Super Admin)'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [paused], properties: { paused: { type: boolean } } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AutomationOverview' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /automation/runs:
+    get:
+      tags: [automation]
+      summary: 'Run log, waiting drafts first'
+      parameters:
+        - { name: ruleId, in: query, schema: { type: integer } }
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/RunStatus' } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/AutomationRun' } }
+        '403': { $ref: '#/components/responses/Problem' }
+  /automation/runs/{id}/decision:
+    post:
+      tags: [automation]
+      summary: 'Approve (runs now) or discard a draft'
+      description: |
+        403 for invoice actions (rule 9) unless SUPER_ADMIN. 409 when already decided or automation is paused.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [decision], properties: { decision: { type: string, enum: [APPROVE, DISCARD] } } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AutomationRun' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /automation/deputy:
+    put:
+      tags: [automation]
+      summary: 'Set or clear the deputy and the money limits (Super Admin)'
+      description: |
+        Deputy is an active MANAGER, at most 90 days. payoutLimit and discountPercent are the Settings values every approval checks.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DeputyInput' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeputySettings' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /knowledge:
+    get:
+      tags: [knowledge]
+      summary: 'Articles (staff)'
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { name: category, in: query, schema: { $ref: '#/components/schemas/ArticleCategory' } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/ArticleItem' } }
+        '403': { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [knowledge]
+      summary: 'Create an article (admin area)'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ArticleInput' }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ArticleDetail' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /knowledge/{id}:
+    get:
+      tags: [knowledge]
+      summary: 'One article'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ArticleDetail' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+    put:
+      tags: [knowledge]
+      summary: 'Edit an article (admin area)'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ArticleInput' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ArticleDetail' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /knowledge/{id}/helpful:
+    post:
+      tags: [knowledge]
+      summary: 'Toggle your helpful vote'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ArticleDetail' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /services:
+    get:
+      tags: [services]
+      summary: 'Service catalogue with task templates (admin area)'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/ServiceItem' } }
+        '403': { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [services]
+      summary: 'Add a service (Super Admin)'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ServiceInput' }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServiceItem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /services/{id}:
+    put:
+      tags: [services]
+      summary: 'Edit a service (Super Admin)'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ServiceInput' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ServiceItem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /services/{id}/preview:
+    post:
+      tags: [services]
+      summary: 'Who would get each task and when (rule 3)'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProjectFromTemplate' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TemplatePreview' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /services/{id}/projects:
+    post:
+      tags: [services]
+      summary: 'Create the project, milestones and tasks from the template'
+      description: |
+        One transaction. Tasks go to the least-loaded active person in each department who is not on leave that day;
+        a department with nobody free gets the manager and is listed in gaps. Client-facing tasks get a reviewer who is not the assignee.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProjectFromTemplate' }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, properties: { projectId: { type: string }, gaps: { type: array, items: { type: string } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /onboarding:
+    get:
+      tags: [onboarding]
+      summary: 'The client''s own getting-started checklist'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Onboarding' }
+        '403': { $ref: '#/components/responses/Problem' }
+    patch:
+      tags: [onboarding]
+      summary: 'Questionnaire answers, access handover, kick-off booking'
+      description: |
+        Client roles only. Access may be NOT_STARTED, GRANTED (needs a non-secret account ID) or NOT_NEEDED; anything that looks
+        like a password is refused (400). Kick-off on a working day from tomorrow, 10:00-18:30 IST.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OnboardingPatch' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Onboarding' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /clients/{id}/onboarding:
+    get:
+      tags: [onboarding]
+      summary: 'A client''s checklist (admin area)'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Onboarding' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /clients/{id}/onboarding/verify:
+    post:
+      tags: [onboarding]
+      summary: 'Staff confirm granted access works'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [platform], properties: { platform: { $ref: '#/components/schemas/AccessPlatform' } } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Onboarding' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+
 components:
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
@@ -4729,3 +5089,212 @@ components:
             views: { type: integer }
             clicks: { type: integer }
             leads: { type: integer }
+
+    # ---------- Automation, knowledge, services, onboarding (1.0.0) ----------
+    RuleMode: { type: string, enum: [ON, DRAFT, OFF] }
+    RunStatus: { type: string, enum: [DONE, WAITING, APPROVED, DISCARDED, SKIPPED, FAILED] }
+    RuleParam:
+      type: object
+      required: [key, label, unit, value, min, max]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        unit: { type: string, enum: [hours, days, percent, count, list] }
+        value: { oneOf: [{ type: number }, { type: array, items: { type: number } }] }
+        min: { type: number }
+        max: { type: number }
+    RuleAction:
+      type: object
+      required: [key, label, enabled, external]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        enabled: { type: boolean }
+        external: { type: boolean, description: 'Reaches a client, creator or partner' }
+    AutomationRule:
+      type: object
+      required: [id, name, trigger, condition, escalation, mode, clientFacing, params, actions, runsLast30, waiting, updatedAt, updatedBy]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        trigger: { type: string }
+        condition: { type: string }
+        escalation: { type: string }
+        humanStep: { type: string }
+        mode: { $ref: '#/components/schemas/RuleMode' }
+        clientFacing: { type: boolean }
+        params: { type: array, items: { $ref: '#/components/schemas/RuleParam' } }
+        actions: { type: array, items: { $ref: '#/components/schemas/RuleAction' } }
+        runsLast30: { type: integer }
+        waiting: { type: integer }
+        lastRunAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        updatedBy: { type: string }
+        draftSince: { type: string, format: date }
+    AutomationRun:
+      type: object
+      required: [id, ruleId, ruleName, at, status, summary, target]
+      properties:
+        id: { type: string }
+        ruleId: { type: integer }
+        ruleName: { type: string }
+        at: { type: string, format: date-time }
+        status: { $ref: '#/components/schemas/RunStatus' }
+        summary: { type: string }
+        target: { type: string }
+        link: { type: string }
+        decidedBy: { type: string }
+        decidedAt: { type: string, format: date-time }
+    DeputySettings:
+      type: object
+      required: [payoutLimit, discountPercent, active, candidates]
+      properties:
+        deputyId: { type: string }
+        deputyName: { type: string }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        payoutLimit: { type: number }
+        discountPercent: { type: number }
+        active: { type: boolean }
+        candidates: { type: array, items: { $ref: '#/components/schemas/IdName' } }
+    DeputyInput:
+      type: object
+      required: [payoutLimit, discountPercent]
+      properties:
+        deputyId: { type: string, description: 'Omit to clear the deputy' }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        payoutLimit: { type: number, minimum: 0, maximum: 500000 }
+        discountPercent: { type: number, minimum: 0, maximum: 20 }
+    AutomationOverview:
+      type: object
+      required: [paused, rules, waiting, deputy, neverAutomated]
+      properties:
+        paused: { type: boolean }
+        pausedBy: { type: string }
+        rules: { type: array, items: { $ref: '#/components/schemas/AutomationRule' } }
+        waiting: { type: integer }
+        deputy: { $ref: '#/components/schemas/DeputySettings' }
+        neverAutomated: { type: array, items: { type: string } }
+    RulePatch:
+      type: object
+      properties:
+        mode: { $ref: '#/components/schemas/RuleMode' }
+        params: { type: object, additionalProperties: { oneOf: [{ type: number }, { type: array, items: { type: number } }] } }
+        actions: { type: object, additionalProperties: { type: boolean } }
+    ArticleCategory: { type: string, enum: [PROCESS, BRAND, TOOLS, CLIENTS, HR] }
+    ArticleItem:
+      type: object
+      required: [id, title, category, summary, tags, updatedAt, updatedBy, helpful, stale]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        category: { $ref: '#/components/schemas/ArticleCategory' }
+        summary: { type: string }
+        tags: { type: array, items: { type: string } }
+        updatedAt: { type: string, format: date-time }
+        updatedBy: { type: string }
+        helpful: { type: integer }
+        stale: { type: boolean, description: 'Not updated for 6 months' }
+    ArticleDetail:
+      allOf:
+        - $ref: '#/components/schemas/ArticleItem'
+        - type: object
+          required: [body, voted]
+          properties:
+            body: { type: string }
+            voted: { type: boolean }
+    ArticleInput:
+      type: object
+      required: [title, category, summary, body, tags]
+      properties:
+        title: { type: string, minLength: 5, maxLength: 120 }
+        category: { $ref: '#/components/schemas/ArticleCategory' }
+        summary: { type: string, minLength: 10, maxLength: 200 }
+        body: { type: string, minLength: 20, maxLength: 10000 }
+        tags: { type: array, maxItems: 6, items: { type: string } }
+    TemplateTask:
+      type: object
+      required: [title, department, startDay, durationDays, priority, clientFacing]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        department: { type: string }
+        startDay: { type: integer, description: 'Working days after the project start' }
+        durationDays: { type: integer }
+        priority: { $ref: '#/components/schemas/Priority' }
+        clientFacing: { type: boolean }
+    ServiceInput:
+      type: object
+      required: [name, service, description, price, billing, timelineWeeks, revisions, active, tasks]
+      properties:
+        name: { type: string }
+        service: { type: string }
+        description: { type: string }
+        price: { type: number }
+        billing: { type: string, enum: [MONTHLY, ONE_OFF] }
+        timelineWeeks: { type: integer, minimum: 1, maximum: 52 }
+        revisions: { type: integer, minimum: 0, maximum: 10 }
+        active: { type: boolean }
+        tasks: { type: array, minItems: 1, maxItems: 30, items: { $ref: '#/components/schemas/TemplateTask' } }
+    ServiceItem:
+      allOf:
+        - $ref: '#/components/schemas/ServiceInput'
+        - type: object
+          required: [id, projectsCreated]
+          properties:
+            id: { type: string }
+            projectsCreated: { type: integer }
+    ProjectFromTemplate:
+      type: object
+      required: [clientId, startDate, ownerId]
+      properties:
+        clientId: { type: string }
+        name: { type: string }
+        startDate: { type: string, format: date }
+        ownerId: { type: string }
+    TemplatePreview:
+      type: object
+      required: [tasks, gaps]
+      properties:
+        tasks: { type: array, items: { type: object, properties: { title: { type: string }, due: { type: string, format: date }, assignee: { $ref: '#/components/schemas/IdName' }, department: { type: string }, clientFacing: { type: boolean } } } }
+        gaps: { type: array, items: { type: string } }
+    AccessPlatform: { type: string, enum: [META, GOOGLE_ADS, ANALYTICS, SEARCH_CONSOLE, WEBSITE] }
+    AccessItem:
+      type: object
+      required: [platform, label, how, status]
+      properties:
+        platform: { $ref: '#/components/schemas/AccessPlatform' }
+        label: { type: string }
+        how: { type: string }
+        status: { type: string, enum: [NOT_STARTED, GRANTED, VERIFIED, NOT_NEEDED] }
+        accountRef: { type: string, description: 'A public account ID, never a password' }
+        verifiedBy: { type: string }
+    Questionnaire:
+      type: object
+      properties:
+        about: { type: string }
+        audience: { type: string }
+        competitors: { type: string }
+        goals: { type: string }
+        voice: { type: string }
+        avoid: { type: string }
+    Onboarding:
+      type: object
+      required: [clientId, clientName, progress, questionnaire, questionnaireDone, access, brandAssetsUploaded]
+      properties:
+        clientId: { type: string }
+        clientName: { type: string }
+        progress: { type: integer }
+        questionnaire: { $ref: '#/components/schemas/Questionnaire' }
+        questionnaireDone: { type: boolean }
+        access: { type: array, items: { $ref: '#/components/schemas/AccessItem' } }
+        brandAssetsUploaded: { type: boolean }
+        kickoff: { type: object, properties: { date: { type: string, format: date }, time: { type: string }, bookedBy: { type: string } } }
+        completedAt: { type: string, format: date-time }
+    OnboardingPatch:
+      type: object
+      properties:
+        questionnaire: { $ref: '#/components/schemas/Questionnaire' }
+        access: { type: object, properties: { platform: { $ref: '#/components/schemas/AccessPlatform' }, status: { type: string, enum: [NOT_STARTED, GRANTED, NOT_NEEDED] }, accountRef: { type: string } } }
+        kickoff: { type: object, properties: { date: { type: string, format: date }, time: { type: string } } }

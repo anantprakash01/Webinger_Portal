@@ -27,7 +27,8 @@
 .compare-table { min-width: 480px; }
 
 /* PR hub */
-tr.is-muted td { opacity: 0.55; }
+/* Shaded, not faded: faded text fails contrast. The "Do not contact" badge carries the meaning. */
+tr.is-muted td { background: var(--surface-2); color: var(--ink-2); }
 .select--inline { width: auto; min-height: 36px; padding: 4px 8px; }
 
 /* Offer preview */

@@ -24,7 +24,6 @@ import type {
   Health,
   Priority,
   ProjectStatus,
-  Role,
   TaskComment,
   TaskFile,
   TaskStatus,
@@ -38,7 +37,7 @@ export const day = (offset: number) => {
 };
 export const ago = (hours: number) => new Date(Date.now() - hours * 3_600_000).toISOString();
 
-export const DEMO_PASSWORD = 'demo1234';
+export { DEMO_PASSWORD } from './demo';
 
 /** Organisation ids. Webinger itself is one organisation; each client company is another. */
 export const ORG = {
@@ -129,7 +128,7 @@ export const organisations: Array<{ id: string; name: string; kind: 'AGENCY' | '
 ];
 
 /** Demo two-step code. Phase 1: TOTP from an authenticator app. */
-export const DEMO_MFA_CODE = '123456';
+export { DEMO_MFA_CODE } from './demo';
 
 /** Passwords set through invite or reset links. Everyone else uses DEMO_PASSWORD. Phase 1: BCrypt hashes in MySQL. */
 export const passwords = new Map<string, string>();
@@ -160,17 +159,8 @@ export const settings: PortalSettings = {
 };
 
 /** Which demo account to offer per role on the login screen. */
-export const demoAccounts: Array<{ role: Role; email: string; note?: string }> = [
-  { role: 'SUPER_ADMIN', email: 'admin@webinger.in' },
-  { role: 'MANAGER', email: 'manager@webinger.in' },
-  { role: 'EMPLOYEE', email: 'priya@webinger.in' },
-  { role: 'CLIENT_OWNER', email: 'arjun@terrafoods.in', note: 'Terra Foods' },
-  { role: 'CLIENT_REP', email: 'neha@terrafoods.in', note: 'Terra Foods' },
-  { role: 'CLIENT_OWNER', email: 'sameer@novaclinics.in', note: 'Nova Clinics' },
-  { role: 'CLIENT_OWNER', email: 'farah@sunriseretail.in', note: 'Sunrise, 40 projects' },
-  { role: 'INFLUENCER', email: 'ananya@creator.in' },
-  { role: 'PARTNER', email: 'hello@lensworks.in' },
-];
+// demoAccounts lives in ./demo so screens can import it without the seed data.
+export { demoAccounts } from './demo';
 
 /* ---------------------------------------------------------------- projects */
 

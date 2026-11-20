@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { LuArrowLeft, LuCircleAlert, LuCircleCheck, LuPencil, LuTriangleAlert, LuX } from 'react-icons/lu';
-import { useAccountManagers, useClient, useClientMutation } from '@/api/queries';
+import { useAccountManagers, useClient, useClientMutation, useClientOnboarding, useOnboardingAction } from '@/api/queries';
+import { AccessBadge, OnboardingProgress } from '@/components/onboarding';
 import { useAuth } from '@/auth/AuthContext';
 import { DemoEmail } from '@/components/auth';
 import { Avatar, Badge, Button, Card, Drawer, EmptyState, ErrorState, Input, PageHeader, PageSkeleton, Progress, dueLabel, formatDateLong, formatINR } from '@/components/ui';
@@ -132,6 +133,8 @@ export function AdminClientDetail() {
             ))}
           </ul>
         </Card>
+
+        <OnboardingCard clientId={c.id} />
 
         <Card title="Profile">
           <dl className="kv">
@@ -431,5 +434,35 @@ function EditClientForm({ client, isSuper, onDone }) {
         Save changes
       </Button>
     </form>
+  );
+}
+
+/** Week 8: the client's getting-started checklist; staff confirm the access handover works. */
+function OnboardingCard({ clientId }) {
+  const { data: o, error, isPending, refetch } = useClientOnboarding(clientId);
+  const action = useOnboardingAction();
+  if (isPending) return <div className="skeleton" style={{ height: 200 }} />;
+  if (error) return <ErrorState message={error.message} onRetry={refetch} />;
+  return (
+    <Card title="Onboarding" action={o.completedAt ? <Badge tone="ok">Complete</Badge> : <span className="small muted">{o.progress}%</span>}>
+      <OnboardingProgress o={o} />
+      <ul className="list" style={{ marginTop: 8 }}>
+        {o.access.map((a) => (
+          <li key={a.platform} className="list__item list__item--wrap">
+            <div className="list__main">
+              <div className="list__title small">{a.label}</div>
+              {a.accountRef && <div className="list__meta">{a.accountRef}{a.verifiedBy ? ` · checked by ${a.verifiedBy}` : ''}</div>}
+            </div>
+            <AccessBadge status={a.status} />
+            {a.status === 'GRANTED' && (
+              <Button size="sm" variant="secondary" loading={action.isPending} onClick={() => action.mutate({ kind: 'verify', clientId, platform: a.platform })}>
+                Confirm it works
+              </Button>
+            )}
+          </li>
+        ))}
+      </ul>
+      {o.kickoff && <p className="small muted">Kick-off: {formatDateLong(o.kickoff.date)} at {o.kickoff.time}</p>}
+    </Card>
   );
 }

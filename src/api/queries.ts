@@ -36,6 +36,15 @@ import type {
   UserInvite,
 } from '@/types';
 import type {
+  AccessPlatform,
+  ArticleCategory,
+  ArticleInput,
+  DeputyInput,
+  OnboardingPatch,
+  ProjectFromTemplate,
+  RulePatch,
+  RunStatus,
+  ServiceInput,
   CollabRequestInput,
   DiscoveryQuery,
   NewBrief,
@@ -750,4 +759,59 @@ export const useOfferAction = () =>
             ? api.offers.click(a.id)
             : api.offers.dismiss(a.id),
     [['offers']],
+  );
+
+/* ---------- Week 8: automation, knowledge, services, onboarding ---------- */
+
+export const useAutomation = () => useQuery({ queryKey: ['automation', 'overview'], queryFn: api.automation.overview });
+export const useRuns = (q: { ruleId?: number; status?: RunStatus } = {}) =>
+  useQuery({ queryKey: ['automation', 'runs', q], queryFn: () => api.automation.runs(q), placeholderData: keepPreviousData });
+export const useRulePreview = (id: number | null) =>
+  useQuery({ queryKey: ['automation', 'preview', id], queryFn: () => api.automation.preview(id!), enabled: id !== null, staleTime: 0 });
+
+type AutomationAction =
+  | { kind: 'rule'; id: number; patch: RulePatch }
+  | { kind: 'pause'; paused: boolean }
+  | { kind: 'decide'; id: string; decision: 'APPROVE' | 'DISCARD' }
+  | { kind: 'deputy'; body: DeputyInput };
+
+export const useAutomationAction = () =>
+  useModuleAction(
+    (a: AutomationAction) =>
+      a.kind === 'rule'
+        ? api.automation.updateRule(a.id, a.patch)
+        : a.kind === 'pause'
+          ? api.automation.pause(a.paused)
+          : a.kind === 'decide'
+            ? api.automation.decide(a.id, a.decision)
+            : api.automation.setDeputy(a.body),
+    [['automation'], ['finance'], ['demo'], ['settings']],
+  );
+
+export const useArticles = (q: { q?: string; category?: ArticleCategory }) =>
+  useQuery({ queryKey: ['knowledge', 'list', q], queryFn: () => api.knowledge.list(q), placeholderData: keepPreviousData });
+export const useArticle = (id: string | null) => useQuery({ queryKey: ['knowledge', 'article', id], queryFn: () => api.knowledge.get(id!), enabled: !!id });
+export const useArticleAction = () =>
+  useModuleAction(
+    (a: { kind: 'create'; body: ArticleInput } | { kind: 'update'; id: string; body: ArticleInput } | { kind: 'helpful'; id: string }) =>
+      a.kind === 'create' ? api.knowledge.create(a.body) : a.kind === 'update' ? api.knowledge.update(a.id, a.body) : api.knowledge.helpful(a.id),
+    [['knowledge']],
+  );
+
+export const useServices = () => useQuery({ queryKey: ['services'], queryFn: api.services.list });
+export const useServiceAction = () =>
+  useModuleAction(
+    (a: { kind: 'create'; body: ServiceInput } | { kind: 'update'; id: string; body: ServiceInput } | { kind: 'project'; id: string; body: ProjectFromTemplate }) =>
+      a.kind === 'create' ? api.services.create(a.body) : a.kind === 'update' ? api.services.update(a.id, a.body) : api.services.createProject(a.id, a.body),
+    [['services'], ['projects'], ['automation'], ['tasks']],
+  );
+
+export const useMyOnboarding = () => useQuery({ queryKey: ['onboarding', 'mine'], queryFn: api.onboarding.mine });
+export const useClientOnboarding = (clientId: string) =>
+  useQuery({ queryKey: ['onboarding', 'client', clientId], queryFn: () => api.onboarding.forClient(clientId) });
+export const useOnboardingAction = () =>
+  useModuleAction(
+    (a: { kind: 'update'; patch: OnboardingPatch } | { kind: 'verify'; clientId: string; platform: AccessPlatform }) =>
+      a.kind === 'update' ? api.onboarding.update(a.patch) : api.onboarding.verify(a.clientId, a.platform),
+    [['onboarding']],
   );

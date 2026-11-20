@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { LuEye, LuEyeOff, LuInfo, LuShieldCheck } from 'react-icons/lu';
 import { isMock, takeSignOutReason } from '@/api/client';
-import { demoAccounts, DEMO_MFA_CODE, DEMO_PASSWORD } from '@/api/mock/data';
+import { demoAccounts, DEMO_MFA_CODE, DEMO_PASSWORD } from '@/api/mock/demo';
 import { homePath, useAuth } from '@/auth/AuthContext';
 import { AuthLayout, FormError } from '@/components/auth';
 import { Button, Input } from '@/components/ui';

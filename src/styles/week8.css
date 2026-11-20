@@ -1,0 +1,39 @@
+/* ---------- Week 8: automation, knowledge, services, onboarding, polish ---------- */
+
+/* Accessibility: keyboard users can jump past the navigation. */
+.skip-link {
+  position: absolute;
+  left: 12px;
+  top: -60px;
+  z-index: 100;
+  padding: 10px 16px;
+  border-radius: var(--radius-sm);
+  background: var(--ink);
+  color: #fff;
+  font-weight: 700;
+}
+.skip-link:focus { top: 12px; }
+#content:focus { outline: none; }
+
+.rule-kv { grid-template-columns: 100px 1fr; }
+.preview-list { margin: 0; padding-left: 1.2em; display: grid; gap: 6px; }
+.run--waiting { background: var(--warn-soft); border-radius: var(--radius-sm); padding-left: var(--s-2); padding-right: var(--s-2); }
+
+/* Knowledge base */
+.kb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: var(--s-4); }
+.kb-card { display: grid; gap: 6px; padding: var(--s-5); text-align: left; font: inherit; color: inherit; cursor: pointer; align-content: start; border: 1px solid var(--border); }
+.kb-card:hover { border-color: var(--ink-3); }
+.kb-card:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.kb-card__title { font-weight: 800; font-size: var(--fs-md); }
+.kb-article p, .kb-article ul, .kb-article ol { margin: 0; line-height: 1.6; font-size: var(--fs-sm); }
+.kb-article ul, .kb-article ol { padding-left: 1.3em; display: grid; gap: 4px; }
+
+/* Services */
+.service-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: var(--s-4); align-items: start; }
+.template-tasks { margin: 0; padding-left: 1.3em; display: grid; gap: 4px; }
+
+/* Onboarding */
+.onboard-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.onboard-steps li::before { content: '○ '; color: var(--ink-3); }
+.onboard-steps li.is-done::before { content: '● '; color: var(--ok); }
+.onboard-steps li.is-done { color: var(--ink-2); }

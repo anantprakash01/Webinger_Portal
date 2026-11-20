@@ -20,6 +20,24 @@ import type {
   Availability,
   ChatMessage,
   BillingOverview,
+  AccessPlatform,
+  ArticleCategory,
+  ArticleDetail,
+  ArticleInput,
+  ArticleItem,
+  AutomationOverview,
+  AutomationRule,
+  AutomationRun,
+  DeputyInput,
+  DeputySettings,
+  Onboarding,
+  OnboardingPatch,
+  ProjectFromTemplate,
+  RulePatch,
+  RunStatus,
+  ServiceInput,
+  ServiceItem,
+  TemplatePreview,
   CampaignDetail,
   CampaignItem,
   CollabRequest,
@@ -145,6 +163,8 @@ import * as timesheetMock from './mock/timesheet';
 import * as influencersMock from './mock/influencers';
 import * as partnersMock from './mock/partners';
 import * as offersMock from './mock/offers';
+import * as automationMock from './mock/automation';
+import * as opsMock from './mock/ops';
 import * as mock from './mock/handlers';
 
 const MODE = (import.meta.env.VITE_API_MODE ?? 'mock') as 'mock' | 'http';
@@ -678,6 +698,54 @@ export const api = {
     create: (body: OfferInput) => (isMock ? fromMock((u) => offersMock.createOffer(u, body)) : http<OfferItem>('/offers', json('POST', body))),
     update: (id: string, body: OfferInput) =>
       isMock ? fromMock((u) => offersMock.updateOffer(u, id, body)) : http<OfferItem>(`/offers/${enc(id)}`, json('PUT', body)),
+  },
+  /** Week 8. Automation rules (Super Admin edits, Manager reads), run log and deputy mode. */
+  automation: {
+    overview: () => (isMock ? fromMock(automationMock.automationOverview) : http<AutomationOverview>('/automation')),
+    updateRule: (id: number, patch: RulePatch) =>
+      isMock ? fromMock((u) => automationMock.updateRule(u, id, patch)) : http<AutomationRule>(`/automation/rules/${id}`, json('PATCH', patch)),
+    preview: (id: number) =>
+      isMock ? fromMock((u) => automationMock.previewRule(u, id)) : http<{ ruleId: number; items: string[] }>(`/automation/rules/${id}/preview`, json('POST', {})),
+    pause: (paused: boolean) => (isMock ? fromMock((u) => automationMock.pauseAll(u, paused)) : http<AutomationOverview>('/automation/pause', json('POST', { paused }))),
+    runs: (q: { ruleId?: number; status?: RunStatus } = {}) =>
+      isMock ? fromMock((u) => automationMock.listRuns(u, q)) : http<AutomationRun[]>(`/automation/runs${qs(q)}`),
+    decide: (id: string, decision: 'APPROVE' | 'DISCARD') =>
+      isMock ? fromMock((u) => automationMock.decideRun(u, id, decision)) : http<AutomationRun>(`/automation/runs/${enc(id)}/decision`, json('POST', { decision })),
+    setDeputy: (body: DeputyInput) => (isMock ? fromMock((u) => automationMock.setDeputy(u, body)) : http<DeputySettings>('/automation/deputy', json('PUT', body))),
+  },
+  /** Week 8. Knowledge base (staff read, admin area writes). */
+  knowledge: {
+    list: (q: { q?: string; category?: ArticleCategory } = {}) =>
+      isMock ? fromMock((u) => opsMock.listArticles(u, q)) : http<ArticleItem[]>(`/knowledge${qs(q)}`),
+    get: (id: string) => (isMock ? fromMock((u) => opsMock.getArticle(u, id)) : http<ArticleDetail>(`/knowledge/${enc(id)}`)),
+    create: (body: ArticleInput) => (isMock ? fromMock((u) => opsMock.createArticle(u, body)) : http<ArticleDetail>('/knowledge', json('POST', body))),
+    update: (id: string, body: ArticleInput) =>
+      isMock ? fromMock((u) => opsMock.updateArticle(u, id, body)) : http<ArticleDetail>(`/knowledge/${enc(id)}`, json('PUT', body)),
+    helpful: (id: string) => (isMock ? fromMock((u) => opsMock.toggleHelpful(u, id)) : http<ArticleDetail>(`/knowledge/${enc(id)}/helpful`, json('POST', {}))),
+  },
+  /** Week 8. Service catalogue and "create project from template". */
+  services: {
+    list: () => (isMock ? fromMock(opsMock.listServices) : http<ServiceItem[]>('/services')),
+    create: (body: ServiceInput) => (isMock ? fromMock((u) => opsMock.createService(u, body)) : http<ServiceItem>('/services', json('POST', body))),
+    update: (id: string, body: ServiceInput) =>
+      isMock ? fromMock((u) => opsMock.updateService(u, id, body)) : http<ServiceItem>(`/services/${enc(id)}`, json('PUT', body)),
+    preview: (id: string, body: ProjectFromTemplate) =>
+      isMock ? fromMock((u) => opsMock.previewFromTemplate(u, id, body)) : http<TemplatePreview>(`/services/${enc(id)}/preview`, json('POST', body)),
+    createProject: (id: string, body: ProjectFromTemplate) =>
+      isMock
+        ? fromMock((u) => opsMock.createFromTemplate(u, id, body))
+        : http<{ projectId: string; gaps: string[] }>(`/services/${enc(id)}/projects`, json('POST', body)),
+  },
+  /** Week 8. Client onboarding checklist. */
+  onboarding: {
+    mine: () => (isMock ? fromMock((u) => opsMock.getOnboarding(u)) : http<Onboarding>('/onboarding')),
+    forClient: (clientId: string) =>
+      isMock ? fromMock((u) => opsMock.getOnboarding(u, clientId)) : http<Onboarding>(`/clients/${enc(clientId)}/onboarding`),
+    update: (patch: OnboardingPatch) => (isMock ? fromMock((u) => opsMock.updateOnboarding(u, patch)) : http<Onboarding>('/onboarding', json('PATCH', patch))),
+    verify: (clientId: string, platform: AccessPlatform) =>
+      isMock
+        ? fromMock((u) => opsMock.verifyAccess(u, clientId, platform))
+        : http<Onboarding>(`/clients/${enc(clientId)}/onboarding/verify`, json('POST', { platform })),
   },
   /** Prototype only: emails the mock would have sent, so invite and reset links can be opened. */
   demo: {

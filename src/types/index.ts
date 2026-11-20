@@ -1783,3 +1783,213 @@ export interface OfferInput {
   endDate: string;
   active: boolean;
 }
+
+/* ---------- Week 8: automation ---------- */
+
+/** ON runs by itself; DRAFT prepares each action for a person to approve (every client-facing rule starts here); OFF does nothing. */
+export type RuleMode = 'ON' | 'DRAFT' | 'OFF';
+
+export interface RuleParam {
+  key: string;
+  label: string;
+  unit: 'hours' | 'days' | 'percent' | 'count' | 'list';
+  value: number | number[];
+  min: number;
+  max: number;
+}
+
+export interface RuleAction {
+  key: string;
+  label: string;
+  enabled: boolean;
+  /** Sends something to a client, creator or partner (needs a month in DRAFT before ON). */
+  external: boolean;
+}
+
+export interface AutomationRule {
+  id: number;
+  name: string;
+  trigger: string;
+  condition: string;
+  escalation: string;
+  /** Plain-language description of what never happens automatically for this rule. */
+  humanStep?: string;
+  mode: RuleMode;
+  clientFacing: boolean;
+  params: RuleParam[];
+  actions: RuleAction[];
+  runsLast30: number;
+  waiting: number;
+  lastRunAt?: string;
+  updatedAt: string;
+  updatedBy: string;
+  /** ON is allowed only after this date for client-facing rules (30 days in DRAFT). */
+  draftSince?: string;
+}
+
+export type RunStatus = 'DONE' | 'WAITING' | 'APPROVED' | 'DISCARDED' | 'SKIPPED' | 'FAILED';
+export interface AutomationRun {
+  id: string;
+  ruleId: number;
+  ruleName: string;
+  at: string;
+  status: RunStatus;
+  summary: string;
+  /** Who or what it touches, e.g. "Nova Clinics · WEB/2026-27/0095". */
+  target: string;
+  link?: string;
+  decidedBy?: string;
+  decidedAt?: string;
+}
+
+export interface DeputySettings {
+  deputyId?: string;
+  deputyName?: string;
+  from?: string;
+  to?: string;
+  /** Payouts up to this amount the deputy (and managers) may approve. */
+  payoutLimit: number;
+  /** Discounts up to this percent a manager may give. */
+  discountPercent: number;
+  active: boolean;
+  candidates: Array<{ id: string; name: string }>;
+}
+
+export interface AutomationOverview {
+  paused: boolean;
+  pausedBy?: string;
+  rules: AutomationRule[];
+  waiting: number;
+  deputy: DeputySettings;
+  /** Never automated, whatever the rule says (CLAUDE.md section 5). */
+  neverAutomated: string[];
+}
+
+export interface RulePatch {
+  mode?: RuleMode;
+  params?: Record<string, number | number[]>;
+  actions?: Record<string, boolean>;
+}
+
+export interface DeputyInput {
+  deputyId?: string;
+  from?: string;
+  to?: string;
+  payoutLimit: number;
+  discountPercent: number;
+}
+
+/* ---------- Week 8: knowledge base ---------- */
+
+export type ArticleCategory = 'PROCESS' | 'BRAND' | 'TOOLS' | 'CLIENTS' | 'HR';
+export interface ArticleItem {
+  id: string;
+  title: string;
+  category: ArticleCategory;
+  summary: string;
+  tags: string[];
+  updatedAt: string;
+  updatedBy: string;
+  helpful: number;
+  /** Not reviewed for 6 months. */
+  stale: boolean;
+}
+export interface ArticleDetail extends ArticleItem {
+  body: string;
+  /** This person already voted. */
+  voted: boolean;
+}
+export interface ArticleInput {
+  title: string;
+  category: ArticleCategory;
+  summary: string;
+  body: string;
+  tags: string[];
+}
+
+/* ---------- Week 8: service catalogue and templates ---------- */
+
+export interface TemplateTask {
+  id: string;
+  title: string;
+  /** Department that does it; the person is picked by workload when a project is created. */
+  department: string;
+  /** Working days after the project start. */
+  startDay: number;
+  durationDays: number;
+  priority: Priority;
+  clientFacing: boolean;
+}
+
+export interface ServiceItem {
+  id: string;
+  name: string;
+  /** Matches the project "service" used everywhere else. */
+  service: string;
+  description: string;
+  price: number;
+  billing: 'MONTHLY' | 'ONE_OFF';
+  timelineWeeks: number;
+  revisions: number;
+  active: boolean;
+  tasks: TemplateTask[];
+  projectsCreated: number;
+}
+
+export type ServiceInput = Omit<ServiceItem, 'id' | 'projectsCreated' | 'tasks'> & { tasks: Array<Omit<TemplateTask, 'id'>> };
+
+export interface ProjectFromTemplate {
+  clientId: string;
+  name: string;
+  startDate: string;
+  ownerId: string;
+}
+
+export interface TemplatePreview {
+  tasks: Array<{ title: string; due: string; assignee: { id: string; name: string }; department: string; clientFacing: boolean }>;
+  /** Departments with nobody available (rule 3: manager alerted). */
+  gaps: string[];
+}
+
+/* ---------- Week 8: client onboarding ---------- */
+
+export type AccessPlatform = 'META' | 'GOOGLE_ADS' | 'ANALYTICS' | 'SEARCH_CONSOLE' | 'WEBSITE';
+export type AccessStatus = 'NOT_STARTED' | 'GRANTED' | 'VERIFIED' | 'NOT_NEEDED';
+
+export interface AccessItem {
+  platform: AccessPlatform;
+  label: string;
+  /** What to share: always partner/role access, never a password. */
+  how: string;
+  status: AccessStatus;
+  /** A non-secret account ID (e.g. Meta Business ID), never a password. */
+  accountRef?: string;
+  verifiedBy?: string;
+}
+
+export interface Questionnaire {
+  about: string;
+  audience: string;
+  competitors: string;
+  goals: string;
+  voice: string;
+  avoid: string;
+}
+
+export interface Onboarding {
+  clientId: string;
+  clientName: string;
+  progress: number;
+  questionnaire: Questionnaire;
+  questionnaireDone: boolean;
+  access: AccessItem[];
+  brandAssetsUploaded: boolean;
+  kickoff?: { date: string; time: string; bookedBy: string };
+  completedAt?: string;
+}
+
+export interface OnboardingPatch {
+  questionnaire?: Partial<Questionnaire>;
+  access?: { platform: AccessPlatform; status: AccessStatus; accountRef?: string };
+  kickoff?: { date: string; time: string };
+}

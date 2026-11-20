@@ -278,7 +278,7 @@ Week estimates assume one or two developers with AI assistance.
 | 5 | Finance, billing, client reports | **Done** |
 | 6 | Sales pipeline, people, performance | **Done** |
 | 7 | Influencer portal, partner portal, discovery | **Done** |
-| 8 | Automation UI, knowledge base, polish, contract freeze | Next |
+| 8 | Automation UI, knowledge base, polish, contract freeze | **Done** |
 
 ### Week 1 — Done
 - Vite + React + TS project, PWA manifest, `@/` alias, `.env.example` (`VITE_API_MODE=mock|http`, `VITE_API_BASE_URL`, `VITE_MOCK_DELAY_MS`), dev proxy `/api` → `localhost:8080`.
@@ -453,7 +453,27 @@ Original spec:
 - Partner `/partner/briefs` and `/partner/invoices`; admin PR hub screens (media contacts, pitches, coverage, vendors).
 - Client offers banner management in admin.
 
-### Week 8 — Automation UI and polish
+### Week 8 — Automation UI and polish (Done, 2026-11-20)
+What was built (spec below kept for reference). Branch `week-8`. **Phase 0 is complete.**
+- Contract **v1.0.0, Core frozen** (164 paths, 186 operations): `/automation` (+ `/rules/{id}`, `/rules/{id}/preview`, `/pause`, `/runs`, `/runs/{id}/decision`, `/deputy`), `/knowledge` (+ `/{id}`, `/{id}/helpful`), `/services` (+ `/{id}`, `/{id}/preview`, `/{id}/projects`), `/onboarding`, `/clients/{id}/onboarding` (+ `/verify`). Change log in `docs/api/CHANGELOG.md`; every change from now on gets an entry (date, what, why).
+- **Backend handover notes: `docs/backend-handover.md`**, generated from the contract and the 94 `BACKEND:` rules in the mock layer (per module: Spring package, endpoints, tables, rules with file:line). Regenerate with the scratch script rather than editing by hand.
+- Mock modules: `automation.ts` (rules, preview, pause, run log, draft decisions, deputy), `ops.ts` (knowledge base, service catalogue and templates, onboarding), `data8.ts` (18 rules with settings and actions, run log, 6 articles, 5 services with task templates, onboarding for 3 clients), `demo.ts` (demo sign-in constants, kept apart so a real-API build doesn't ship the seed data).
+- Rules the backend must copy (all marked `BACKEND:`):
+  - Automation: Super Admin edits, Manager reads and reviews drafts (permission matrix). Modes ON / DRAFT (each action waits for a person) / OFF. **A client-facing rule spends 30 days in DRAFT before it can be ON**; going back to DRAFT restarts the clock. Settings stay inside each parameter's range; a rule keeps at least one action. Global pause (kill switch) stops everything, including approving drafts. Invoice drafts (rule 9) need a Super Admin. Approving a draft runs the action at once (e.g. the invoice reminder email). Never automated: refunds, discounts, contract changes, pausing work, removing users, payouts above the deputy limit.
+  - Deputy mode: an active Manager for at most 90 days; its payout and discount limits are the Settings values every approval already checks.
+  - Knowledge base: staff only (never clients); admin area writes; stale after 6 months; one helpful vote per person.
+  - Services: Super Admin sets services and prices; the admin area creates projects from them. **One click → project (rule 3)**: one transaction for the project, two milestones and the template's tasks; each task goes to the least-loaded active person in its department who isn't on leave that day (working days, holidays skipped); a department with nobody free gets the manager and is reported back; client-facing tasks get a reviewer who isn't the assignee. Inactive services and ended clients are refused.
+  - Onboarding: the client fills their own checklist (questionnaire, access handover, kick-off). **Access is recorded as partner/user access with a public account ID; anything that looks like a password is refused.** Only staff mark access VERIFIED. Kick-off on a working day from tomorrow, 10:00–18:30. Progress = questionnaire + access + brand files in the vault + kick-off, 25% each.
+- Screens: `/admin/automation` (stats, rules table, rule drawer with mode, settings, actions and "What would it do now?", Waiting for review, Run log, Deputy mode, pause/resume), `/admin/services` (catalogue cards, editor with task templates, "Create project" with a preview of who gets what), `/admin/knowledge` and `/employee/knowledge` (shared page: search, categories, article drawer with lists, helpful vote, editor for the admin area), `/client/onboarding` ("Getting started": progress, questionnaire, access handover, brand files, kick-off) and an Onboarding card on `/admin/clients/:id` with "Confirm it works". Nav: Admin → Services, Knowledge base; Automation now visible to Managers (read only); Client → Getting started.
+- Polish:
+  - **Accessibility**: axe-core (WCAG 2.1 A/AA) run on 44 pages across all five areas plus login and sign-up: **no serious or critical issues left**. Fixed colour contrast by darkening `--ink-3` (#7a7a7a → #666666), `--ok` (#1f8a4c → #17703d) and `--warn` (#b26a00 → #8a5300), and by shading instead of fading do-not-contact rows. Added a "Skip to content" link (first Tab stop) and a focusable `main`.
+  - **Performance**: every screen is now lazy-loaded (52 chunks; a page's code downloads when it is first opened). The demo build's main file is 650 kB (200 kB gzipped) because it carries the mock data; a real-API build (`VITE_API_MODE=http`) drops to 473 kB (143 kB gzipped), mostly React and libraries.
+  - Phone review: every Week 8 screen checked at 390 px without horizontal scroll (earlier weeks were checked in their own suites).
+- Verified: build + typecheck pass; 78 new + 558 earlier access-rule checks pass; 75 browser checks in headless Edge (rules, drafts approved and really sent, 30-day draft rule, preview, pause/resume, deputy, template → project, article, onboarding verify, manager read-only, password refused in access handover, kick-off, employee knowledge, skip link, lazy loading, phones, axe on 44 pages); Week 3–7 and Clients browser suites pass.
+- Fixed along the way: the kick-off form defaulted to a date that could be a Sunday (now the next office day).
+- Not built (Phase 1+): the scheduler that fires the rules (Spring events + Quartz), audit-log screen, payroll inputs, real file storage, server-side PDFs.
+
+Original spec:
 - Admin `/admin/automation`: rule list (the 18 rules), trigger/condition/action editor, on/off/draft mode, run log, deputy mode settings.
 - Employee `/employee/knowledge`; onboarding checklist for clients; service catalogue and templates editor.
 - Accessibility pass, empty/error states everywhere, phone review of every screen, performance check.
@@ -491,8 +511,8 @@ src/api/queries.ts         TanStack Query client, cache keys, hooks (reads + mut
 src/api/mock/              fake data + handlers (reference for backend access rules):
                            handlers.ts, approvals.ts, accounts.ts, chat.ts, files.ts,
                            clients.ts, finance.ts, reports.ts, pipeline.ts, people.ts, timesheet.ts,
-                           influencers.ts, partners.ts, offers.ts,
-                           hours.ts, data.ts, data4.ts, data5.ts, data6.ts, data7.ts, art.ts
+                           influencers.ts, partners.ts, offers.ts, automation.ts, ops.ts, demo.ts,
+                           hours.ts, data.ts, data4.ts, data5.ts, data6.ts, data7.ts, data8.ts, art.ts
 src/auth/                  AuthContext, RequireArea guard
 src/components/ui/         base components and format helpers
 src/components/status.jsx  health, task, project, deliverable, priority, visibility badges
@@ -505,13 +525,16 @@ src/components/finance.jsx printable invoice/quote document, line items editor, 
 src/components/reports.jsx metric tile, metric formatting and month-on-month change
 src/components/people.jsx  pipeline stages, attendance/leave badges, load bar, scorecard view
 src/components/creators.jsx creator, campaign, payout, brief and pitch badges, file picker
+src/components/onboarding.jsx onboarding progress and access badges
+docs/api/CHANGELOG.md      contract change log (frozen at 1.0.0)
+docs/backend-handover.md   per-module endpoints, tables and BACKEND rules for Phase 1
 src/pages/admin/finance/   finance tabs and forms used by AdminFinance
 src/api/realtime.ts        live-update transport (polling now, WebSocket in Phase 1)
 src/pages/shared/          screens shared by several areas (MessagesPage)
 src/components/Logo.jsx    placeholder wordmark
 src/layout/                AppShell, nav per role, shell.css
 src/pages/<area>/          screens per portal area
-src/styles/                tokens.css, global.css, work.css (Week 2), week3.css, week4.css, clients.css, finance.css, people.css, creators.css
+src/styles/                tokens.css, global.css, work.css (Week 2), week3.css, week4.css, clients.css, finance.css, people.css, creators.css, week8.css
 ```
 
 ---
@@ -570,9 +593,10 @@ src/styles/                tokens.css, global.css, work.css (Week 2), week3.css,
 - [ ] CA review (GST invoice format, TDS) and lawyer review (privacy policy, agreements)
 
 ## 18. Current state and next action
-- Weeks 1–7 and Admin clients are done; `npm run build` passes. On a new machine: `npm install`, `cp .env.example .env`, `npm run dev`.
+- **Phase 0 (Weeks 1–8) is complete**; `npm run build` passes and the Core API contract is frozen at v1.0.0. On a new machine: `npm install`, `cp .env.example .env`, `npm run dev`.
 - Push to a private GitHub repo and connect Cloudflare Pages so reviewers see every push.
 - Git workflow: one branch per week from an up-to-date `main` (e.g. `week-5-finance`), pull request into `main`, merge, then start the next week. Never stack a week on an unmerged branch.
 - Week 5 can reuse: client records (`clients.ts`: legal name, GSTIN, address for GST invoices; contracts for recurring billing; `lifetimeValue` and `outstanding` should come from real invoices/payments), `files.ts` signed links for invoice PDFs, `hours.ts` for due dates, `DemoEmail` for invoice emails, ticket clocks for payment reminders.
-- Week 8 can reuse: the 18 automation rules already have hooks in the mock (rule 1 offer/website leads, 2 quote acceptance, 9 reminders, 11 report publishing, 13 leave handover, 14 budget alerts, 17 payout requests) to show as run-log examples; Settings → deputy payout limit for deputy mode.
-- **Next: merge the Week 7 PR, then start Week 8 (automation UI, knowledge base, polish, contract freeze) as described in section 10.**
+- Phase 0 gate (section 9): the owner, two staff and one friendly client click through every flow on the deployed prototype and sign off the screens. Collect changes as contract change-log entries.
+- Phase 1 starts from `docs/backend-handover.md`: build the Spring Boot modules in its order (auth and accounts first), port each `BACKEND:` rule with its status codes, and switch screens to the real API one module at a time with `VITE_API_MODE=http`.
+- **Next: merge the Week 8 PR, deploy the prototype for the Phase 0 sign-off, then start Phase 1 (backend) from the handover notes.**

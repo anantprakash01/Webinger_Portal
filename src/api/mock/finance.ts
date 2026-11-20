@@ -697,8 +697,8 @@ export function financeSummary(user: User): FinanceSummary {
 /**
  * GET /finance/profit
  * Project margin = invoiced (before GST) − hours × cost rate − direct costs (CLAUDE.md section 6).
- * BACKEND: cost rates are SUPER_ADMIN only. Phase 2 takes hours per person from time entries;
- * until then the project's logged hours are costed at the average rate of its staff.
+ * BACKEND: cost rates are SUPER_ADMIN only. Time entries are costed per person at their own rate (Week 6);
+ * hours logged before the timesheet existed are costed at the average rate of the project's staff.
  */
 export function profitReport(user: User): ProfitReport {
   requireOwner(user);

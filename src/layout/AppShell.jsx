@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { LuEllipsis, LuLogOut, LuX } from 'react-icons/lu';
 import { isMock } from '@/api/client';
-import { demoAccounts, DEMO_MFA_CODE, DEMO_PASSWORD } from '@/api/mock/data';
+import { demoAccounts, DEMO_MFA_CODE, DEMO_PASSWORD } from '@/api/mock/demo';
 import { homePath, useAuth } from '@/auth/AuthContext';
 import { Logo } from '@/components/Logo';
-import { Avatar, Button } from '@/components/ui';
+import { Avatar, Button, PageSkeleton } from '@/components/ui';
 import { AREA_BY_ROLE, ROLE_LABEL } from '@/types';
 import { AREA_TITLE, navFor } from './nav';
 import './shell.css';
@@ -45,6 +45,9 @@ export function AppShell() {
 
   return (
     <div className="shell">
+      <a href="#content" className="skip-link">
+        Skip to content
+      </a>
       <aside className="sidebar" aria-label="Main navigation">
         <div className="sidebar__brand">
           <Logo height={26} />
@@ -101,8 +104,11 @@ export function AppShell() {
           <Avatar name={user.name} size={32} />
         </header>
 
-        <main id="content">
-          <Outlet />
+        <main id="content" tabIndex={-1}>
+          {/* Week 8: pages load on demand; the shell stays put while one loads. */}
+          <Suspense fallback={<PageSkeleton />}>
+            <Outlet />
+          </Suspense>
         </main>
       </div>
 
