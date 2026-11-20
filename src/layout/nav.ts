@@ -1,6 +1,7 @@
 import type { IconType } from 'react-icons';
 import {
   LuBadgeCheck,
+  LuBadgePercent,
   LuBriefcase,
   LuCalendarDays,
   LuChartColumn,
@@ -13,6 +14,7 @@ import {
   LuListChecks,
   LuMegaphone,
   LuMessageSquare,
+  LuNewspaper,
   LuReceipt,
   LuSettings,
   LuSparkles,
@@ -50,6 +52,8 @@ export const NAV: Record<Area, NavItem[]> = {
     { to: '/admin/pipeline', label: 'Sales pipeline', icon: LuChartColumn, week: 6 },
     { to: '/admin/people', label: 'People', icon: LuUserRound, week: 6 },
     { to: '/admin/influencers', label: 'Influencers', icon: LuSparkles, week: 7 },
+    { to: '/admin/pr', label: 'PR hub', icon: LuNewspaper, week: 7 },
+    { to: '/admin/offers', label: 'Offers', icon: LuBadgePercent, week: 7 },
     { to: '/admin/automation', label: 'Automation', icon: LuWorkflow, roles: ['SUPER_ADMIN'], week: 8 },
     { to: '/admin/settings', label: 'Users & settings', icon: LuSettings, primary: true, roles: ['SUPER_ADMIN'], week: 3 },
   ],

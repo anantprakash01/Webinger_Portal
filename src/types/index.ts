@@ -1016,6 +1016,8 @@ export interface ProfitReport {
 }
 
 export type ExportKind = 'invoices' | 'payments' | 'expenses';
+/** Export log also records media-contact exports from the PR hub (Week 7). */
+export type ExportLogKind = ExportKind | 'media-contacts';
 export interface ExportFile {
   fileName: string;
   content: string;
@@ -1025,7 +1027,7 @@ export interface ExportLogItem {
   id: string;
   at: string;
   by: string;
-  kind: ExportKind;
+  kind: ExportLogKind;
   from: string;
   to: string;
   rows: number;
@@ -1389,4 +1391,395 @@ export interface TimerStart {
   projectId: string;
   taskId?: string;
   note?: string;
+}
+
+/* ---------- Week 7: influencers ---------- */
+
+export type Platform = 'INSTAGRAM' | 'YOUTUBE' | 'LINKEDIN' | 'X';
+export type InfluencerTier = 'NANO' | 'MICRO' | 'MID' | 'MACRO' | 'MEGA';
+export type VerificationStatus = 'DRAFT' | 'PENDING' | 'VERIFIED' | 'REJECTED';
+
+export interface PlatformStat {
+  platform: Platform;
+  handle: string;
+  followers: number;
+  /** Average engagement rate, percent. */
+  engagementRate: number;
+}
+
+export interface InfluencerRates {
+  reel: number;
+  story: number;
+  post: number;
+}
+
+/** What the influencer (and staff) see. Clients get `DiscoveryCard` instead. */
+export interface InfluencerProfile {
+  id: string;
+  name: string;
+  bio: string;
+  city: string;
+  languages: string[];
+  niches: string[];
+  platforms: PlatformStat[];
+  rates: InfluencerRates;
+  availability: 'AVAILABLE' | 'BUSY' | 'PAUSED';
+  verification: VerificationStatus;
+  rejectReason?: string;
+  insightsFile?: string;
+  consentToShare: boolean;
+  /** Masked for everyone, e.g. "UPI ••••@okhdfc". */
+  payoutMethod?: { kind: 'UPI' | 'BANK'; masked: string };
+  /** Masked PAN (TDS needs it). */
+  panMasked?: string;
+  completeness: number;
+  missing: string[];
+  tier: InfluencerTier;
+  rating?: number;
+  campaignsDone: number;
+}
+
+/** Staff view: adds contact details and checks for the verification queue. */
+export interface InfluencerAdminItem extends InfluencerProfile {
+  email: string;
+  phone?: string;
+  submittedAt?: string;
+  /** Automatic checks, e.g. "Engagement 0.6% is low for 85k followers". */
+  flags: string[];
+  hasLogin: boolean;
+}
+
+export interface ProfileInput {
+  name?: string;
+  bio?: string;
+  city?: string;
+  languages?: string[];
+  niches?: string[];
+  platforms?: PlatformStat[];
+  rates?: InfluencerRates;
+  availability?: InfluencerProfile['availability'];
+  consentToShare?: boolean;
+  insightsFile?: string;
+  payout?: { kind: 'UPI' | 'BANK'; upi?: string; account?: string; ifsc?: string };
+  pan?: string;
+}
+
+export interface InfluencerSignup {
+  name: string;
+  email: string;
+  phone: string;
+  password: string;
+  city: string;
+  niches: string[];
+  platform: Platform;
+  handle: string;
+  followers: number;
+  acceptTerms: boolean;
+  consentToShare: boolean;
+}
+
+/** Client discovery: contacts and handles masked; fee is an indicative price including the agency's fee. */
+export interface DiscoveryCard {
+  id: string;
+  name: string;
+  city: string;
+  languages: string[];
+  niches: string[];
+  tier: InfluencerTier;
+  platforms: Array<{ platform: Platform; handleMasked: string; followers: number; engagementRate: number }>;
+  totalFollowers: number;
+  bestEngagement: number;
+  priceFrom: number;
+  rating?: number;
+  campaignsDone: number;
+  availability: InfluencerProfile['availability'];
+  shortlisted: boolean;
+}
+
+export interface DiscoveryQuery {
+  q?: string;
+  niche?: string;
+  city?: string;
+  platform?: Platform;
+  tier?: InfluencerTier;
+  maxPrice?: number;
+  minEngagement?: number;
+  shortlisted?: boolean;
+}
+
+export interface CollabRequestInput {
+  influencerIds: string[];
+  brief: string;
+  budget: number;
+  startBy: string;
+}
+
+export interface CollabRequest {
+  id: string;
+  clientId: string;
+  clientName: string;
+  requestedBy: string;
+  influencers: Array<{ id: string; name: string }>;
+  brief: string;
+  budget: number;
+  startBy: string;
+  status: 'NEW' | 'IN_PROGRESS' | 'CLOSED';
+  createdAt: string;
+  campaignId?: string;
+}
+
+export type CampaignStatus = 'DRAFT' | 'RUNNING' | 'DONE';
+/** One influencer's journey through a campaign (CLAUDE.md 4.3: brief → invite → accept/counter → draft → approval → live → proof → payout). */
+export type CollabStatus =
+  | 'INVITED'
+  | 'COUNTERED'
+  | 'ACCEPTED'
+  | 'DECLINED'
+  | 'DRAFT_SUBMITTED'
+  | 'CHANGES_REQUESTED'
+  | 'DRAFT_APPROVED'
+  | 'LIVE'
+  | 'PAID';
+
+export interface CampaignCollab {
+  influencerId: string;
+  influencerName: string;
+  fee: number;
+  counterFee?: number;
+  status: CollabStatus;
+  respondBy: string;
+  draftDue: string;
+  draft?: { caption: string; fileName: string; disclosure: boolean; at: string };
+  feedback?: string;
+  liveUrl?: string;
+  proofFile?: string;
+  postedAt?: string;
+  payoutId?: string;
+  rating?: number;
+}
+
+export interface CampaignItem {
+  id: string;
+  title: string;
+  clientId: string;
+  clientName: string;
+  status: CampaignStatus;
+  budget: number;
+  committed: number;
+  deliverable: string;
+  createdAt: string;
+  collabs: CampaignCollab[];
+}
+
+export interface CampaignDetail extends CampaignItem {
+  brief: string;
+  hashtags: string;
+  dos: string;
+}
+
+export interface NewCampaign {
+  clientId: string;
+  title: string;
+  brief: string;
+  deliverable: string;
+  hashtags?: string;
+  dos?: string;
+  budget: number;
+  fromRequestId?: string;
+}
+
+/** The influencer's side of a campaign: no budget, no other influencers' fees. */
+export interface MyCampaign {
+  id: string;
+  title: string;
+  brand: string;
+  brief: string;
+  deliverable: string;
+  hashtags: string;
+  dos: string;
+  collab: CampaignCollab;
+}
+
+export type PayoutStatus = 'REQUESTED' | 'APPROVED' | 'PAID' | 'REJECTED';
+export interface Payout {
+  id: string;
+  influencerId: string;
+  influencerName: string;
+  campaignId: string;
+  campaignTitle: string;
+  brand: string;
+  gross: number;
+  /** TDS rate (percent) and amount deducted. CA to confirm the section (194J / 194R). */
+  tdsRate: number;
+  tds: number;
+  net: number;
+  status: PayoutStatus;
+  requestedAt: string;
+  approvedBy?: string;
+  paidAt?: string;
+  reference?: string;
+  /** Above the deputy payout limit (Settings): only a Super Admin approves. */
+  needsOwner: boolean;
+}
+
+export interface MyPayouts {
+  payouts: Payout[];
+  pending: number;
+  paidThisYear: number;
+  tdsThisYear: number;
+  payoutMethod?: InfluencerProfile['payoutMethod'];
+}
+
+/* ---------- Week 7: partners and PR hub ---------- */
+
+export type BriefStatus = 'NEW' | 'IN_PROGRESS' | 'SUBMITTED' | 'CHANGES_REQUESTED' | 'APPROVED';
+export interface PartnerBrief {
+  id: string;
+  partnerId: string;
+  partnerName: string;
+  title: string;
+  description: string;
+  /** Client and project names are shared; nothing else from the client record. */
+  projectName: string;
+  clientName: string;
+  due: string;
+  fee: number;
+  status: BriefStatus;
+  submissions: Array<{ id: string; at: string; files: string[]; note: string }>;
+  feedback?: string;
+  invoiceId?: string;
+}
+
+export interface NewBrief {
+  partnerId: string;
+  projectId: string;
+  title: string;
+  description: string;
+  due: string;
+  fee: number;
+}
+
+export type PartnerInvoiceStatus = 'SUBMITTED' | 'APPROVED' | 'PAID' | 'REJECTED';
+export interface PartnerInvoice {
+  id: string;
+  partnerId: string;
+  partnerName: string;
+  number: string;
+  briefId: string;
+  briefTitle: string;
+  amount: number;
+  gst: number;
+  total: number;
+  status: PartnerInvoiceStatus;
+  submittedAt: string;
+  decidedBy?: string;
+  rejectReason?: string;
+  paidAt?: string;
+}
+
+export interface NewPartnerInvoice {
+  briefId: string;
+  number: string;
+  amount: number;
+  gst: number;
+}
+
+export interface MediaContact {
+  id: string;
+  name: string;
+  outlet: string;
+  beat: string;
+  city: string;
+  language: string;
+  email: string;
+  phone?: string;
+  ownerName: string;
+  lastContacted?: string;
+  lastVerified: string;
+  /** Not verified for six months. */
+  stale: boolean;
+  consent: boolean;
+  doNotContact: boolean;
+}
+
+export interface NewMediaContact {
+  name: string;
+  outlet: string;
+  beat: string;
+  city: string;
+  language: string;
+  email: string;
+  phone?: string;
+  consent: boolean;
+}
+
+export type PitchStatus = 'DRAFT' | 'SENT' | 'FOLLOW_UP' | 'COVERED' | 'DECLINED';
+export interface Pitch {
+  id: string;
+  title: string;
+  clientId: string;
+  clientName: string;
+  recipients: Array<{ id: string; name: string; outlet: string }>;
+  status: PitchStatus;
+  sentAt?: string;
+  followUp?: string;
+  ownerName: string;
+}
+
+export interface Coverage {
+  id: string;
+  clientId: string;
+  clientName: string;
+  outlet: string;
+  headline: string;
+  url: string;
+  date: string;
+  reach: number;
+  pitchId?: string;
+}
+
+export interface Vendor {
+  id: string;
+  name: string;
+  service: string;
+  city: string;
+  rateNote: string;
+  rating?: number;
+  jobsDone: number;
+  hasLogin: boolean;
+  documents: string[];
+}
+
+export interface PrHub {
+  contacts: MediaContact[];
+  pitches: Pitch[];
+  coverage: Coverage[];
+  vendors: Vendor[];
+}
+
+/* ---------- Week 7: offers ---------- */
+
+export interface OfferItem {
+  id: string;
+  title: string;
+  text: string;
+  cta: string;
+  /** Shown only to clients who don't buy this service yet. */
+  service: string;
+  startDate: string;
+  endDate: string;
+  active: boolean;
+  views: number;
+  clicks: number;
+  leads: number;
+}
+
+export interface OfferInput {
+  title: string;
+  text: string;
+  cta: string;
+  service: string;
+  startDate: string;
+  endDate: string;
+  active: boolean;
 }

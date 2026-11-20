@@ -1,0 +1,42 @@
+/* ---------- Week 7: creators, partners, PR, offers ---------- */
+
+.check { display: flex; gap: var(--s-2); align-items: flex-start; cursor: pointer; }
+.check input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--ink); flex-shrink: 0; }
+.auth__links { display: flex; justify-content: space-between; flex-wrap: wrap; gap: var(--s-2); }
+
+.note--warn { background: var(--warn-soft); }
+.note--warn svg { color: var(--warn); }
+
+/* Profile wizard */
+.platform-row { display: grid; grid-template-columns: 90px minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr) 40px; gap: var(--s-2); align-items: end; padding-bottom: var(--s-3); border-bottom: 1px dashed var(--border); }
+@media (max-width: 640px) {
+  .platform-row { grid-template-columns: 1fr 1fr 40px; }
+  .platform-row > strong { grid-column: 1 / -1; }
+  .platform-row > .field:first-of-type { grid-column: 1 / -1; }
+}
+
+/* Discovery */
+.creator-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: var(--s-4); }
+.creator-card { display: grid; gap: var(--s-3); padding: var(--s-5); align-content: start; }
+.creator-card.is-picked { outline: 2px solid var(--ink); }
+.creator-card__name { margin: 0; font-size: var(--fs-md); font-weight: 800; }
+.creator-card__stats { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: var(--fs-sm); }
+.creator-card__stats li { display: flex; justify-content: space-between; gap: var(--s-2); font-variant-numeric: tabular-nums; }
+.creator-card .is-loved svg { fill: var(--brand-red); color: var(--brand-red); }
+.creator-card .row svg { vertical-align: -2px; }
+.compare-table { min-width: 480px; }
+
+/* PR hub */
+tr.is-muted td { opacity: 0.55; }
+.select--inline { width: auto; min-height: 36px; padding: 4px 8px; }
+
+/* Offer preview */
+.offer-preview { display: flex; gap: var(--s-2); align-items: center; flex-wrap: wrap; padding: 14px 20px; border-radius: var(--radius); background: var(--brand-red-soft); }
+.offer-preview .btn { pointer-events: none; }
+
+/* Fieldsets default to min-width: min-content, which widens phone layouts with chip rows. */
+fieldset { min-width: 0; }
+/* Two-up form rows: let the columns shrink below the inputs' natural width, and stack on narrow phones. */
+.grid--pair { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 480px) { .grid--pair { grid-template-columns: minmax(0, 1fr); } }
+.field__input { min-width: 0; }

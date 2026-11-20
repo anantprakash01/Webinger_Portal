@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Webinger Portal API
-  version: 0.6.0
+  version: 0.7.0
   description: |
     Contract between the React frontend and the Spring Boot backend.
     Week 1 covers sign-in and one dashboard per portal area.
@@ -9,6 +9,8 @@ info:
     Week 3 adds approvals, internal review, the client team, user admin, settings and the auth flows.
     Week 4 adds messages, tickets, uploads and files. Live updates: Phase 0 polls GET .../messages;
     Phase 1 adds Spring WebSocket (STOMP) topics /topic/conversations/{id} and /user/queue/inbox with the same payloads.
+    0.7.0 adds creators (public sign-up with email verification, profile, verification, discovery,
+    campaigns, payouts), the partner portal, the PR hub and the dashboard offer slot.
     0.6.0 adds the sales pipeline (won deal -> client + project), people (attendance, leave with task
     handover, workload, scorecards) and self-service time tracking, leave and attendance under /me.
     0.5.0 adds finance (invoices with GST, quotes, payments with TDS, expenses, profit, CA export),
@@ -44,6 +46,15 @@ info:
       - people: /people/* is SUPER_ADMIN and MANAGER (Phase 1: managers their teams). Nobody approves their own
         leave; a manager's leave goes to a Super Admin. Cost rates and pay never appear in these responses.
       - me: /me/* is staff only and always the caller's own data (attendance, leave, scorecard, time entries).
+      - creators: /public/influencers/* needs no session (bot check + rate limit). /me/influencer, /me/campaigns and
+        /me/payouts are INFLUENCER only and the caller's own. /influencers, /campaigns and /payouts are admin area;
+        payouts above Settings.deputyPayoutLimit need SUPER_ADMIN; recording a payout as paid is SUPER_ADMIN only.
+      - discovery: client roles; verified creators who consented only; never email, phone or full handles; prices
+        include the agency margin. Shortlists and requests are per client organisation.
+      - partners: /partner/* is PARTNER only and their organisation's briefs and invoices; /partner-briefs admin area;
+        partner invoice decisions SUPER_ADMIN only.
+      - pr: GET /pr is staff (employees read); writes admin area; contact export SUPER_ADMIN only and logged.
+      - offers: clients see at most one offer, for a service they don't buy; /offers management is admin area.
       - clients: /clients is SUPER_ADMIN and MANAGER only; creating a client (it issues a login)
         and changing a client's status are SUPER_ADMIN only; lifetimeValue is never sent to managers
 servers:
@@ -1971,6 +1982,835 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
 
+  /public/influencers/signup:
+    post:
+      tags: [creators]
+      summary: 'Creator sign-up (public)'
+      description: |
+        Creates an INFLUENCER account in INVITED state and emails a 24-hour verification link. Sign-in is refused (403)
+        until the email is verified. 409 for an existing email or handle. Min 1,000 followers; terms must be accepted.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InfluencerSignup' }
+      responses:
+        '202':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, properties: { email: { type: string } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+  /public/influencers/verify:
+    post:
+      tags: [creators]
+      summary: 'Confirm the email and sign in'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [token], properties: { token: { type: string } } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+        '410': { $ref: '#/components/responses/Problem' }
+  /me/influencer:
+    get:
+      tags: [creators]
+      summary: 'Own creator profile with completeness'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InfluencerProfile' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+    patch:
+      tags: [creators]
+      summary: 'Update own profile'
+      description: |
+        Payout details and PAN are stored encrypted in a restricted table; only masked forms are returned.
+        Changing platforms or follower numbers on a VERIFIED profile sets it back to PENDING (hidden from clients).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProfileInput' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InfluencerProfile' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /me/influencer/submit:
+    post:
+      tags: [creators]
+      summary: 'Send for verification (profile must be complete)'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InfluencerProfile' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /me/campaigns:
+    get:
+      tags: [creators]
+      summary: 'Own campaign rows (no budget, no other creators'' fees)'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/MyCampaign' } }
+        '403': { $ref: '#/components/responses/Problem' }
+  /me/campaigns/{id}/respond:
+    post:
+      tags: [creators]
+      summary: 'Accept, counter (higher, at most 3x) or decline an invite'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [action], properties: { action: { type: string, enum: [ACCEPT, COUNTER, DECLINE] }, counterFee: { type: number } } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MyCampaign' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /me/campaigns/{id}/draft:
+    post:
+      tags: [creators]
+      summary: 'Submit a draft'
+      description: |
+        ASCI: disclosure must be true and the caption must carry #ad / #paidpartnership / 'paid partnership' (400 otherwise).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [caption, fileName, disclosure], properties: { caption: { type: string }, fileName: { type: string }, disclosure: { type: boolean } } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MyCampaign' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /me/campaigns/{id}/live:
+    post:
+      tags: [creators]
+      summary: 'Share the live link and proof; creates the payout request (rule 17)'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [liveUrl, proofFile], properties: { liveUrl: { type: string }, proofFile: { type: string } } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MyCampaign' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /me/payouts:
+    get:
+      tags: [creators]
+      summary: 'Own payout statement (gross, TDS, net)'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MyPayouts' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /discovery/influencers:
+    get:
+      tags: [discovery]
+      summary: 'Verified creators for clients, ranked by rating then engagement'
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { name: niche, in: query, schema: { type: string } }
+        - { name: city, in: query, schema: { type: string } }
+        - { name: platform, in: query, schema: { $ref: '#/components/schemas/Platform' } }
+        - { name: tier, in: query, schema: { $ref: '#/components/schemas/InfluencerTier' } }
+        - { name: maxPrice, in: query, schema: { type: number } }
+        - { name: minEngagement, in: query, schema: { type: number } }
+        - { name: shortlisted, in: query, schema: { type: boolean } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/DiscoveryCard' } }
+        '403': { $ref: '#/components/responses/Problem' }
+  /discovery/shortlist/{id}:
+    post:
+      tags: [discovery]
+      summary: 'Toggle a creator on the client''s shared shortlist (max 30)'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DiscoveryCard' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /discovery/requests:
+    get:
+      tags: [discovery]
+      summary: 'The client''s own collaboration requests'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/CollabRequest' } }
+        '403': { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [discovery]
+      summary: 'Ask the agency to run a collaboration with 1-5 creators'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CollabRequestInput' }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CollabRequest' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /influencers:
+    get:
+      tags: [creators-admin]
+      summary: 'All creators with contacts and automatic flags'
+      parameters:
+        - { name: verification, in: query, schema: { $ref: '#/components/schemas/VerificationStatus' } }
+        - { name: q, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/InfluencerAdminItem' } }
+        '403': { $ref: '#/components/responses/Problem' }
+  /influencers/{id}/verification:
+    post:
+      tags: [creators-admin]
+      summary: 'Verify or ask for changes (reason 10+ chars)'
+      description: |
+        Only PENDING profiles. VERIFY needs an audience insights file (409 otherwise). The creator is emailed.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [decision], properties: { decision: { type: string, enum: [VERIFY, REJECT] }, reason: { type: string } } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InfluencerAdminItem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /influencers/requests:
+    get:
+      tags: [creators-admin]
+      summary: 'Client collaboration requests, new first'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/CollabRequest' } }
+        '403': { $ref: '#/components/responses/Problem' }
+  /campaigns:
+    get:
+      tags: [creators-admin]
+      summary: 'Campaigns'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/CampaignItem' } }
+        '403': { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [creators-admin]
+      summary: 'Create a campaign (optionally from a client request)'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NewCampaign' }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CampaignDetail' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /campaigns/{id}:
+    get:
+      tags: [creators-admin]
+      summary: 'Campaign with every creator row'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CampaignDetail' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /campaigns/{id}/invites:
+    post:
+      tags: [creators-admin]
+      summary: 'Invite a verified creator'
+      description: |
+        409 when not verified, paused, already invited, or committed fees would exceed the budget.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [influencerId, fee, respondBy, draftDue], properties: { influencerId: { type: string }, fee: { type: number }, respondBy: { type: string, format: date }, draftDue: { type: string, format: date } } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CampaignDetail' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /campaigns/{id}/collabs/{influencerId}/counter:
+    post:
+      tags: [creators-admin]
+      summary: 'Accept or decline a counter offer'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: influencerId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [accept], properties: { accept: { type: boolean } } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CampaignDetail' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /campaigns/{id}/collabs/{influencerId}/review:
+    post:
+      tags: [creators-admin]
+      summary: 'Approve a draft or request changes'
+      description: |
+        APPROVE requires the ASCI disclosure in the caption (409). CHANGES requires feedback.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: influencerId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [decision], properties: { decision: { type: string, enum: [APPROVE, CHANGES] }, feedback: { type: string } } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CampaignDetail' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /campaigns/{id}/collabs/{influencerId}/rating:
+    post:
+      tags: [creators-admin]
+      summary: 'Rate a creator 1-5 after the post is live (feeds discovery ranking)'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: influencerId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [rating], properties: { rating: { type: number, minimum: 1, maximum: 5 } } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CampaignDetail' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /payouts:
+    get:
+      tags: [creators-admin]
+      summary: 'Creator payouts'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Payout' } }
+        '403': { $ref: '#/components/responses/Problem' }
+  /payouts/{id}/approve:
+    post:
+      tags: [creators-admin]
+      summary: 'Approve (above the deputy limit: Super Admin only)'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Payout' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /payouts/{id}/reject:
+    post:
+      tags: [creators-admin]
+      summary: 'Put a payout on hold with a reason'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [reason], properties: { reason: { type: string } } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Payout' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /payouts/{id}/paid:
+    post:
+      tags: [creators-admin]
+      summary: 'Record the transfer (Super Admin)'
+      description: |
+        Needs payout details on file. The gross fee is added to Finance expenses (MEDIA); TDS is due to the government.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [reference], properties: { reference: { type: string } } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Payout' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /partner/briefs:
+    get:
+      tags: [partners]
+      summary: 'The partner''s own briefs (client and project names only)'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/PartnerBrief' } }
+        '403': { $ref: '#/components/responses/Problem' }
+  /partner/briefs/{id}/start:
+    post:
+      tags: [partners]
+      summary: 'Start a brief'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PartnerBrief' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /partner/briefs/{id}/submit:
+    post:
+      tags: [partners]
+      summary: 'Submit work (1-10 files)'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [files], properties: { files: { type: array, items: { type: string } }, note: { type: string } } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PartnerBrief' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /partner/invoices:
+    get:
+      tags: [partners]
+      summary: 'The partner''s own invoices'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/PartnerInvoice' } }
+        '403': { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [partners]
+      summary: 'Invoice an approved brief'
+      description: |
+        One open invoice per brief; amount up to the agreed fee; GST up to 18%; invoice number unique per partner.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NewPartnerInvoice' }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PartnerInvoice' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /partner-briefs:
+    get:
+      tags: [partners-admin]
+      summary: 'All partner briefs'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/PartnerBrief' } }
+        '403': { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [partners-admin]
+      summary: 'Share a brief with a partner'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NewBrief' }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PartnerBrief' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /partner-briefs/{id}/review:
+    post:
+      tags: [partners-admin]
+      summary: 'Approve submitted work or request changes'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [decision], properties: { decision: { type: string, enum: [APPROVE, CHANGES] }, feedback: { type: string } } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PartnerBrief' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /partner-invoices:
+    get:
+      tags: [partners-admin]
+      summary: 'Partner invoices'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/PartnerInvoice' } }
+        '403': { $ref: '#/components/responses/Problem' }
+  /partner-invoices/{id}/decision:
+    post:
+      tags: [partners-admin]
+      summary: 'Approve, reject (reason) or mark paid (reference); Super Admin'
+      description: |
+        PAID adds a FREELANCER expense on the brief's project (Finance -> Profit direct costs).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [decision], properties: { decision: { type: string, enum: [APPROVE, REJECT, PAID] }, note: { type: string } } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PartnerInvoice' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /pr:
+    get:
+      tags: [pr]
+      summary: 'Media contacts, pitches, coverage and vendors'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PrHub' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /pr/contacts:
+    post:
+      tags: [pr]
+      summary: 'Add a media contact (duplicate check on email and phone)'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NewMediaContact' }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MediaContact' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /pr/contacts/{id}:
+    patch:
+      tags: [pr]
+      summary: 'Mark verified, set consent or do-not-contact'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, properties: { verified: { type: boolean }, consent: { type: boolean }, doNotContact: { type: boolean } } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MediaContact' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /pr/contacts/export:
+    get:
+      tags: [pr]
+      summary: 'CSV of contacts without do-not-contact rows (Super Admin, logged)'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExportFile' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /pr/pitches:
+    post:
+      tags: [pr]
+      summary: 'Draft a pitch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [title, clientId, recipientIds], properties: { title: { type: string }, clientId: { type: string }, recipientIds: { type: array, items: { type: string } } } }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Pitch' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /pr/pitches/{id}:
+    patch:
+      tags: [pr]
+      summary: 'Change pitch status'
+      description: |
+        Sending is refused (409) while any recipient has no consent, is do-not-contact or was not verified in 6 months.
+        Sending sets a follow-up in 3 days.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [status], properties: { status: { $ref: '#/components/schemas/PitchStatus' } } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Pitch' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /pr/coverage:
+    post:
+      tags: [pr]
+      summary: 'Log published coverage (marks the pitch covered)'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [clientId, outlet, headline, url, date], properties: { clientId: { type: string }, outlet: { type: string }, headline: { type: string }, url: { type: string }, date: { type: string, format: date }, reach: { type: number }, pitchId: { type: string } } }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Coverage' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /offers:
+    get:
+      tags: [offers]
+      summary: 'Offers with views, clicks and leads'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/OfferItem' } }
+        '403': { $ref: '#/components/responses/Problem' }
+    post:
+      tags: [offers]
+      summary: 'Create an offer'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OfferInput' }
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OfferItem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+  /offers/{id}:
+    put:
+      tags: [offers]
+      summary: 'Edit an offer'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OfferInput' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OfferItem' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /offers/{id}/click:
+    post:
+      tags: [offers]
+      summary: 'Client clicked the offer: counts it and creates or updates a pipeline lead (rule 1)'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, properties: { message: { type: string } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /offers/{id}/dismiss:
+    post:
+      tags: [offers]
+      summary: 'Hide the offer for this person'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Done }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+
 components:
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
@@ -3522,3 +4362,370 @@ components:
         projectId: { type: string }
         taskId: { type: string }
         note: { type: string }
+
+    # ---------- Creators, partners, PR, offers (0.7.0) ----------
+    Platform: { type: string, enum: [INSTAGRAM, YOUTUBE, LINKEDIN, X] }
+    InfluencerTier: { type: string, enum: [NANO, MICRO, MID, MACRO, MEGA] }
+    VerificationStatus: { type: string, enum: [DRAFT, PENDING, VERIFIED, REJECTED] }
+    PlatformStat:
+      type: object
+      required: [platform, handle, followers, engagementRate]
+      properties:
+        platform: { $ref: '#/components/schemas/Platform' }
+        handle: { type: string }
+        followers: { type: integer }
+        engagementRate: { type: number }
+    InfluencerRates: { type: object, properties: { reel: { type: number }, story: { type: number }, post: { type: number } } }
+    InfluencerProfile:
+      type: object
+      required: [id, name, bio, city, languages, niches, platforms, rates, availability, verification, consentToShare, completeness, missing, tier, campaignsDone]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        bio: { type: string }
+        city: { type: string }
+        languages: { type: array, items: { type: string } }
+        niches: { type: array, items: { type: string } }
+        platforms: { type: array, items: { $ref: '#/components/schemas/PlatformStat' } }
+        rates: { $ref: '#/components/schemas/InfluencerRates' }
+        availability: { type: string, enum: [AVAILABLE, BUSY, PAUSED] }
+        verification: { $ref: '#/components/schemas/VerificationStatus' }
+        rejectReason: { type: string }
+        insightsFile: { type: string }
+        consentToShare: { type: boolean }
+        payoutMethod: { type: object, properties: { kind: { type: string, enum: [UPI, BANK] }, masked: { type: string } } }
+        panMasked: { type: string }
+        completeness: { type: integer }
+        missing: { type: array, items: { type: string } }
+        tier: { $ref: '#/components/schemas/InfluencerTier' }
+        rating: { type: number }
+        campaignsDone: { type: integer }
+    InfluencerAdminItem:
+      allOf:
+        - $ref: '#/components/schemas/InfluencerProfile'
+        - type: object
+          required: [email, flags, hasLogin]
+          properties:
+            email: { type: string }
+            phone: { type: string }
+            submittedAt: { type: string, format: date-time }
+            flags: { type: array, items: { type: string } }
+            hasLogin: { type: boolean }
+    ProfileInput:
+      type: object
+      properties:
+        name: { type: string }
+        bio: { type: string, maxLength: 500 }
+        city: { type: string }
+        languages: { type: array, items: { type: string } }
+        niches: { type: array, maxItems: 4, items: { type: string } }
+        platforms: { type: array, items: { $ref: '#/components/schemas/PlatformStat' } }
+        rates: { $ref: '#/components/schemas/InfluencerRates' }
+        availability: { type: string, enum: [AVAILABLE, BUSY, PAUSED] }
+        consentToShare: { type: boolean }
+        insightsFile: { type: string }
+        payout: { type: object, properties: { kind: { type: string, enum: [UPI, BANK] }, upi: { type: string }, account: { type: string }, ifsc: { type: string } } }
+        pan: { type: string, pattern: '^[A-Z]{5}[0-9]{4}[A-Z]$' }
+    InfluencerSignup:
+      type: object
+      required: [name, email, phone, password, city, niches, platform, handle, followers, acceptTerms, consentToShare]
+      properties:
+        name: { type: string }
+        email: { type: string, format: email }
+        phone: { type: string }
+        password: { type: string, minLength: 8 }
+        city: { type: string }
+        niches: { type: array, items: { type: string } }
+        platform: { $ref: '#/components/schemas/Platform' }
+        handle: { type: string }
+        followers: { type: integer, minimum: 1000 }
+        acceptTerms: { type: boolean }
+        consentToShare: { type: boolean }
+    DiscoveryCard:
+      type: object
+      required: [id, name, city, languages, niches, tier, platforms, totalFollowers, bestEngagement, priceFrom, campaignsDone, availability, shortlisted]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        city: { type: string }
+        languages: { type: array, items: { type: string } }
+        niches: { type: array, items: { type: string } }
+        tier: { $ref: '#/components/schemas/InfluencerTier' }
+        platforms: { type: array, items: { type: object, properties: { platform: { $ref: '#/components/schemas/Platform' }, handleMasked: { type: string }, followers: { type: integer }, engagementRate: { type: number } } } }
+        totalFollowers: { type: integer }
+        bestEngagement: { type: number }
+        priceFrom: { type: number, description: 'Indicative, includes the agency margin' }
+        rating: { type: number }
+        campaignsDone: { type: integer }
+        availability: { type: string, enum: [AVAILABLE, BUSY, PAUSED] }
+        shortlisted: { type: boolean }
+    CollabRequestInput:
+      type: object
+      required: [influencerIds, brief, budget, startBy]
+      properties:
+        influencerIds: { type: array, minItems: 1, maxItems: 5, items: { type: string } }
+        brief: { type: string, minLength: 20 }
+        budget: { type: number, minimum: 5000 }
+        startBy: { type: string, format: date }
+    CollabRequest:
+      type: object
+      required: [id, clientId, clientName, requestedBy, influencers, brief, budget, startBy, status, createdAt]
+      properties:
+        id: { type: string }
+        clientId: { type: string }
+        clientName: { type: string }
+        requestedBy: { type: string }
+        influencers: { type: array, items: { $ref: '#/components/schemas/IdName' } }
+        brief: { type: string }
+        budget: { type: number }
+        startBy: { type: string, format: date }
+        status: { type: string, enum: [NEW, IN_PROGRESS, CLOSED] }
+        createdAt: { type: string, format: date-time }
+        campaignId: { type: string }
+    CollabStatus: { type: string, enum: [INVITED, COUNTERED, ACCEPTED, DECLINED, DRAFT_SUBMITTED, CHANGES_REQUESTED, DRAFT_APPROVED, LIVE, PAID] }
+    CampaignCollab:
+      type: object
+      required: [influencerId, influencerName, fee, status, respondBy, draftDue]
+      properties:
+        influencerId: { type: string }
+        influencerName: { type: string }
+        fee: { type: number }
+        counterFee: { type: number }
+        status: { $ref: '#/components/schemas/CollabStatus' }
+        respondBy: { type: string, format: date }
+        draftDue: { type: string, format: date }
+        draft: { type: object, properties: { caption: { type: string }, fileName: { type: string }, disclosure: { type: boolean }, at: { type: string, format: date-time } } }
+        feedback: { type: string }
+        liveUrl: { type: string }
+        proofFile: { type: string }
+        postedAt: { type: string, format: date-time }
+        payoutId: { type: string }
+        rating: { type: number }
+    CampaignItem:
+      type: object
+      required: [id, title, clientId, clientName, status, budget, committed, deliverable, createdAt, collabs]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        clientId: { type: string }
+        clientName: { type: string }
+        status: { type: string, enum: [DRAFT, RUNNING, DONE] }
+        budget: { type: number }
+        committed: { type: number }
+        deliverable: { type: string }
+        createdAt: { type: string, format: date-time }
+        collabs: { type: array, items: { $ref: '#/components/schemas/CampaignCollab' } }
+    CampaignDetail:
+      allOf:
+        - $ref: '#/components/schemas/CampaignItem'
+        - type: object
+          properties:
+            brief: { type: string }
+            hashtags: { type: string }
+            dos: { type: string }
+    NewCampaign:
+      type: object
+      required: [clientId, title, brief, deliverable, budget]
+      properties:
+        clientId: { type: string }
+        title: { type: string }
+        brief: { type: string, minLength: 20 }
+        deliverable: { type: string }
+        hashtags: { type: string }
+        dos: { type: string }
+        budget: { type: number, minimum: 5000 }
+        fromRequestId: { type: string }
+    MyCampaign:
+      type: object
+      required: [id, title, brand, brief, deliverable, hashtags, dos, collab]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        brand: { type: string }
+        brief: { type: string }
+        deliverable: { type: string }
+        hashtags: { type: string }
+        dos: { type: string }
+        collab: { $ref: '#/components/schemas/CampaignCollab' }
+    Payout:
+      type: object
+      required: [id, influencerId, influencerName, campaignId, campaignTitle, brand, gross, tdsRate, tds, net, status, requestedAt, needsOwner]
+      properties:
+        id: { type: string }
+        influencerId: { type: string }
+        influencerName: { type: string }
+        campaignId: { type: string }
+        campaignTitle: { type: string }
+        brand: { type: string }
+        gross: { type: number }
+        tdsRate: { type: number }
+        tds: { type: number }
+        net: { type: number }
+        status: { type: string, enum: [REQUESTED, APPROVED, PAID, REJECTED] }
+        requestedAt: { type: string, format: date-time }
+        approvedBy: { type: string }
+        paidAt: { type: string, format: date-time }
+        reference: { type: string }
+        needsOwner: { type: boolean, description: 'Above Settings.deputyPayoutLimit' }
+    MyPayouts:
+      type: object
+      required: [payouts, pending, paidThisYear, tdsThisYear]
+      properties:
+        payouts: { type: array, items: { $ref: '#/components/schemas/Payout' } }
+        pending: { type: number }
+        paidThisYear: { type: number }
+        tdsThisYear: { type: number }
+        payoutMethod: { type: object, properties: { kind: { type: string }, masked: { type: string } } }
+    BriefStatus: { type: string, enum: [NEW, IN_PROGRESS, SUBMITTED, CHANGES_REQUESTED, APPROVED] }
+    PartnerBrief:
+      type: object
+      required: [id, partnerId, partnerName, title, description, projectName, clientName, due, fee, status, submissions]
+      properties:
+        id: { type: string }
+        partnerId: { type: string }
+        partnerName: { type: string }
+        title: { type: string }
+        description: { type: string }
+        projectName: { type: string }
+        clientName: { type: string }
+        due: { type: string, format: date }
+        fee: { type: number }
+        status: { $ref: '#/components/schemas/BriefStatus' }
+        submissions: { type: array, items: { type: object, properties: { id: { type: string }, at: { type: string, format: date-time }, files: { type: array, items: { type: string } }, note: { type: string } } } }
+        feedback: { type: string }
+        invoiceId: { type: string }
+    NewBrief:
+      type: object
+      required: [partnerId, projectId, title, description, due, fee]
+      properties:
+        partnerId: { type: string }
+        projectId: { type: string }
+        title: { type: string }
+        description: { type: string }
+        due: { type: string, format: date }
+        fee: { type: number }
+    PartnerInvoice:
+      type: object
+      required: [id, partnerId, partnerName, number, briefId, briefTitle, amount, gst, total, status, submittedAt]
+      properties:
+        id: { type: string }
+        partnerId: { type: string }
+        partnerName: { type: string }
+        number: { type: string }
+        briefId: { type: string }
+        briefTitle: { type: string }
+        amount: { type: number }
+        gst: { type: number }
+        total: { type: number }
+        status: { type: string, enum: [SUBMITTED, APPROVED, PAID, REJECTED] }
+        submittedAt: { type: string, format: date-time }
+        decidedBy: { type: string }
+        rejectReason: { type: string }
+        paidAt: { type: string, format: date-time }
+    NewPartnerInvoice:
+      type: object
+      required: [briefId, number, amount, gst]
+      properties:
+        briefId: { type: string }
+        number: { type: string }
+        amount: { type: number }
+        gst: { type: number }
+    MediaContact:
+      type: object
+      required: [id, name, outlet, beat, city, language, email, ownerName, lastVerified, stale, consent, doNotContact]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        outlet: { type: string }
+        beat: { type: string }
+        city: { type: string }
+        language: { type: string }
+        email: { type: string }
+        phone: { type: string }
+        ownerName: { type: string }
+        lastContacted: { type: string, format: date }
+        lastVerified: { type: string, format: date }
+        stale: { type: boolean, description: 'Not verified for 6 months' }
+        consent: { type: boolean }
+        doNotContact: { type: boolean }
+    NewMediaContact:
+      type: object
+      required: [name, outlet, beat, city, language, email, consent]
+      properties:
+        name: { type: string }
+        outlet: { type: string }
+        beat: { type: string }
+        city: { type: string }
+        language: { type: string }
+        email: { type: string, format: email }
+        phone: { type: string }
+        consent: { type: boolean }
+    PitchStatus: { type: string, enum: [DRAFT, SENT, FOLLOW_UP, COVERED, DECLINED] }
+    Pitch:
+      type: object
+      required: [id, title, clientId, clientName, recipients, status, ownerName]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        clientId: { type: string }
+        clientName: { type: string }
+        recipients: { type: array, items: { type: object, properties: { id: { type: string }, name: { type: string }, outlet: { type: string } } } }
+        status: { $ref: '#/components/schemas/PitchStatus' }
+        sentAt: { type: string, format: date-time }
+        followUp: { type: string, format: date }
+        ownerName: { type: string }
+    Coverage:
+      type: object
+      required: [id, clientId, clientName, outlet, headline, url, date, reach]
+      properties:
+        id: { type: string }
+        clientId: { type: string }
+        clientName: { type: string }
+        outlet: { type: string }
+        headline: { type: string }
+        url: { type: string }
+        date: { type: string, format: date }
+        reach: { type: number }
+        pitchId: { type: string }
+    Vendor:
+      type: object
+      required: [id, name, service, city, rateNote, jobsDone, hasLogin, documents]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        service: { type: string }
+        city: { type: string }
+        rateNote: { type: string }
+        rating: { type: number }
+        jobsDone: { type: integer }
+        hasLogin: { type: boolean }
+        documents: { type: array, items: { type: string } }
+    PrHub:
+      type: object
+      required: [contacts, pitches, coverage, vendors]
+      properties:
+        contacts: { type: array, items: { $ref: '#/components/schemas/MediaContact' } }
+        pitches: { type: array, items: { $ref: '#/components/schemas/Pitch' } }
+        coverage: { type: array, items: { $ref: '#/components/schemas/Coverage' } }
+        vendors: { type: array, items: { $ref: '#/components/schemas/Vendor' } }
+    OfferInput:
+      type: object
+      required: [title, text, cta, service, startDate, endDate, active]
+      properties:
+        title: { type: string, maxLength: 60 }
+        text: { type: string, maxLength: 140 }
+        cta: { type: string, maxLength: 20 }
+        service: { type: string }
+        startDate: { type: string, format: date }
+        endDate: { type: string, format: date }
+        active: { type: boolean }
+    OfferItem:
+      allOf:
+        - $ref: '#/components/schemas/OfferInput'
+        - type: object
+          required: [id, views, clicks, leads]
+          properties:
+            id: { type: string }
+            views: { type: integer }
+            clicks: { type: integer }
+            leads: { type: integer }

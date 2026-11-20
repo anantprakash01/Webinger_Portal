@@ -277,8 +277,8 @@ Week estimates assume one or two developers with AI assistance.
 | 4b | Admin clients (pulled forward from Week 6) | **Done** |
 | 5 | Finance, billing, client reports | **Done** |
 | 6 | Sales pipeline, people, performance | **Done** |
-| 7 | Influencer portal, partner portal, discovery | Next |
-| 8 | Automation UI, knowledge base, polish, contract freeze | |
+| 7 | Influencer portal, partner portal, discovery | **Done** |
+| 8 | Automation UI, knowledge base, polish, contract freeze | Next |
 
 ### Week 1 — Done
 - Vite + React + TS project, PWA manifest, `@/` alias, `.env.example` (`VITE_API_MODE=mock|http`, `VITE_API_BASE_URL`, `VITE_MOCK_DELAY_MS`), dev proxy `/api` → `localhost:8080`.
@@ -425,7 +425,27 @@ Original spec:
 - Admin `/admin/people`: departments, attendance, leave approvals, workload view, scorecards.
 - Employee `/employee/performance` and `/employee/leave`; time tracking timer and weekly timesheet.
 
-### Week 7 — Influencers and partners
+### Week 7 — Influencers and partners (Done, 2026-11-19)
+What was built (spec below kept for reference). Branch `week-7`.
+- Contract v0.7.0 (147 paths): `/public/influencers/signup|verify`; `/me/influencer` (+ `/submit`), `/me/campaigns` (+ `/{id}/respond|draft|live`), `/me/payouts`; `/discovery/influencers`, `/discovery/shortlist/{id}`, `/discovery/requests`; `/influencers` (+ `/{id}/verification`, `/requests`), `/campaigns` (+ `/{id}`, `/invites`, `/collabs/{influencerId}/counter|review|rating`), `/payouts` (+ `/{id}/approve|reject|paid`); `/partner/briefs` (+ `/{id}/start|submit`), `/partner/invoices`, `/partner-briefs` (+ `/{id}/review`), `/partner-invoices` (+ `/{id}/decision`); `/pr`, `/pr/contacts` (+ `/{id}`, `/export`), `/pr/pitches` (+ `/{id}`), `/pr/coverage`; `/offers` (+ `/{id}`, `/click`, `/dismiss`).
+- Mock modules: `influencers.ts` (sign-up, profile, verification, discovery, campaigns, payouts), `partners.ts` (partner briefs and invoices, PR hub), `offers.ts` (offer slot, click → lead), `data7.ts` (11 creators, 4 campaigns, payouts, a client request, briefs, a partner invoice, media contacts, pitches, coverage, vendors, offers). `accounts.ts` gained self sign-up (`registerSelfSignup`, `verifyEmail`, token purpose VERIFY); login refuses INVITED accounts with "Verify your email first".
+- Rules the backend must copy (all marked `BACKEND:`):
+  - **Self sign-up is creators only** (section 14): bot check + rate limit; account stays INVITED until the 24 h single-use email link is opened; min 1,000 followers; terms and consent recorded; duplicate email or handle → 409.
+  - Profile: payout details and PAN stored encrypted in a restricted table, only masked forms leave the API. Submitting needs a complete profile (bio, city, languages, niches, platforms, rates, insights screenshot, payout, PAN, consent). Changing platforms/followers on a verified profile puts it back to PENDING (hidden from clients).
+  - Verification (admin area): automatic flags for engagement < 1% at 10k+ followers (fake-follower check), > 15%, missing insights, a handle used on another profile. Verify needs insights; asking for changes needs a reason. Creator is emailed.
+  - **Discovery (clients): verified + consented + not paused only; never email, phone or full handles (masked `@an•••`); price shown = lowest rate + 25% agency margin, rounded up to ₹500.** Ranked by rating then engagement. Shortlist is shared per client organisation (max 30). Clients never contact creators: "Request collaboration" goes to their account manager (1–5 creators, brief, budget, start date).
+  - Campaigns: only verified, non-paused creators can be invited; committed fees ≤ budget (409). Creators see their own row only (no budget, no other fees). Counter must be higher and at most 3×. **ASCI: a draft needs the disclosure tick and #ad / #paidpartnership / "paid partnership" in the caption, both on submit and on approval.** Live link + proof creates the payout request (rule 17).
+  - Payouts: TDS 10% default (CA to confirm 194J vs 194R), net shown everywhere. **Above Settings → deputy payout limit only a Super Admin approves; recording the transfer is Super Admin only** and adds a MEDIA expense in Finance. Campaign is DONE when every non-declined creator is paid. Ratings (1–5) after live feed discovery ranking.
+  - Partners see only briefs shared with their organisation (client and project names, brief, due, fee). Work: 1–10 files. Invoice only an approved brief, once, amount ≤ agreed fee, GST ≤ 18%, invoice number unique per partner. Super Admin approves/rejects/pays; **paid partner invoices become a FREELANCER expense on the brief's project** (Profit → direct costs).
+  - PR hub: staff read (employees too), admin area writes; duplicate check on email/phone; consent + do-not-contact per contact; **stale after 6 months without verification; a pitch cannot be sent while any recipient lacks consent, is do-not-contact or stale**; sending sets a 3-day follow-up; coverage marks the pitch covered. Contact export Super Admin only, do-not-contact rows left out, logged in the export log.
+  - Offers: at most one per client user, live dates only, never for a service the client already buys (projects or running contracts); views counted once per person; click creates (or adds to) an OFFER lead for the account manager (rule 1); dismiss is per person. Copy limits: title 60, text 140, button 20.
+  - Dashboards: influencer and partner homes, the client offer and the admin "payout above deputy limit" items are now live.
+- Screens: public `/join` (creator sign-up; "Creator? Join our network" link on the login page) and `/verify-email`; `/influencer/profile` (4-step wizard, completeness, send for verification), `/influencer/campaigns` (invites, accept/counter/decline, draft with ASCI tick, live link + proof), `/influencer/payouts` (statement with TDS); `/admin/influencers` (Verification with flags, Directory, Campaigns with invite/counter/review/rate drawer, Payouts with limit and UTR, Client requests → campaign); `/client/influencers` (filters in the URL, shortlist, compare up to 3, request collaboration, my requests); `/partner/briefs`, `/partner/invoices`; `/admin/pr` (contacts with checks and export, pitches, coverage, vendors + briefs + partner invoices); `/admin/offers` (list with views/clicks/leads, editor with preview). New nav: Admin → PR hub, Offers.
+- Fixed along the way: `fieldset` and two-up form rows (`.grid--pair`) could widen phone layouts beyond the screen; both now shrink, and pairs stack under 480 px (applies to every form). The verify-email page sends its single-use token once even when React runs effects twice in development.
+- Verified: build + typecheck pass; 107 new + 451 earlier access-rule checks pass; 51 browser checks in headless Edge (sign-up → verify → wizard → submit, unverified sign-in refused, accept invite, #ad enforced, live → payout with TDS, fake-follower flag, verify, above-limit payout by Super Admin, campaign from client request, contacts export, partner invoice paid, offer created and clicked, manager limit, masked discovery, compare, shortlist, request, partner submit, partner kept out of PR hub, phone layouts without horizontal scroll); Week 3, 4, 5, 6 and Clients browser suites pass.
+- Known limits: uploads record file names only (no storage yet); payout and PAN encryption is the backend's job; client approval of creator drafts, barter shipments and tracked links are later phases; employees have API read access to the PR hub but no screen yet.
+
+Original spec:
 - Public influencer sign-up page + profile wizard.
 - Influencer `/influencer/campaigns`, `/influencer/profile`, `/influencer/payouts`.
 - Admin `/admin/influencers`: verification queue, campaigns, payout approvals.
@@ -471,7 +491,8 @@ src/api/queries.ts         TanStack Query client, cache keys, hooks (reads + mut
 src/api/mock/              fake data + handlers (reference for backend access rules):
                            handlers.ts, approvals.ts, accounts.ts, chat.ts, files.ts,
                            clients.ts, finance.ts, reports.ts, pipeline.ts, people.ts, timesheet.ts,
-                           hours.ts, data.ts, data4.ts, data5.ts, data6.ts, art.ts
+                           influencers.ts, partners.ts, offers.ts,
+                           hours.ts, data.ts, data4.ts, data5.ts, data6.ts, data7.ts, art.ts
 src/auth/                  AuthContext, RequireArea guard
 src/components/ui/         base components and format helpers
 src/components/status.jsx  health, task, project, deliverable, priority, visibility badges
@@ -483,13 +504,14 @@ src/components/chat.jsx    conversation list, thread, composer, response clock, 
 src/components/finance.jsx printable invoice/quote document, line items editor, finance labels, CSV download
 src/components/reports.jsx metric tile, metric formatting and month-on-month change
 src/components/people.jsx  pipeline stages, attendance/leave badges, load bar, scorecard view
+src/components/creators.jsx creator, campaign, payout, brief and pitch badges, file picker
 src/pages/admin/finance/   finance tabs and forms used by AdminFinance
 src/api/realtime.ts        live-update transport (polling now, WebSocket in Phase 1)
 src/pages/shared/          screens shared by several areas (MessagesPage)
 src/components/Logo.jsx    placeholder wordmark
 src/layout/                AppShell, nav per role, shell.css
 src/pages/<area>/          screens per portal area
-src/styles/                tokens.css, global.css, work.css (Week 2), week3.css, week4.css, clients.css, finance.css, people.css
+src/styles/                tokens.css, global.css, work.css (Week 2), week3.css, week4.css, clients.css, finance.css, people.css, creators.css
 ```
 
 ---
@@ -548,9 +570,9 @@ src/styles/                tokens.css, global.css, work.css (Week 2), week3.css,
 - [ ] CA review (GST invoice format, TDS) and lawyer review (privacy policy, agreements)
 
 ## 18. Current state and next action
-- Weeks 1–6 and Admin clients are done; `npm run build` passes. On a new machine: `npm install`, `cp .env.example .env`, `npm run dev`.
+- Weeks 1–7 and Admin clients are done; `npm run build` passes. On a new machine: `npm install`, `cp .env.example .env`, `npm run dev`.
 - Push to a private GitHub repo and connect Cloudflare Pages so reviewers see every push.
 - Git workflow: one branch per week from an up-to-date `main` (e.g. `week-5-finance`), pull request into `main`, merge, then start the next week. Never stack a week on an unmerged branch.
 - Week 5 can reuse: client records (`clients.ts`: legal name, GSTIN, address for GST invoices; contracts for recurring billing; `lifetimeValue` and `outstanding` should come from real invoices/payments), `files.ts` signed links for invoice PDFs, `hours.ts` for due dates, `DemoEmail` for invoice emails, ticket clocks for payment reminders.
-- Week 7 can reuse: the pipeline's board and drawer for campaign stages, `people.ts` approval pattern (no self-approval, admin decides) for influencer verification and payouts, `timesheet.ts` style self-service under `/me`, `files.ts` for content submissions.
-- **Next: merge the Week 6 PR, then start Week 7 (influencers and partners) as described in section 10.**
+- Week 8 can reuse: the 18 automation rules already have hooks in the mock (rule 1 offer/website leads, 2 quote acceptance, 9 reminders, 11 report publishing, 13 leave handover, 14 budget alerts, 17 payout requests) to show as run-log examples; Settings → deputy payout limit for deputy mode.
+- **Next: merge the Week 7 PR, then start Week 8 (automation UI, knowledge base, polish, contract freeze) as described in section 10.**

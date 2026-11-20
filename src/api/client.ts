@@ -20,6 +20,33 @@ import type {
   Availability,
   ChatMessage,
   BillingOverview,
+  CampaignDetail,
+  CampaignItem,
+  CollabRequest,
+  CollabRequestInput,
+  Coverage,
+  DiscoveryCard,
+  DiscoveryQuery,
+  InfluencerAdminItem,
+  InfluencerProfile,
+  InfluencerSignup,
+  MediaContact,
+  MyCampaign,
+  MyPayouts,
+  NewBrief,
+  NewCampaign,
+  NewMediaContact,
+  NewPartnerInvoice,
+  OfferInput,
+  OfferItem,
+  PartnerBrief,
+  PartnerInvoice,
+  Payout,
+  Pitch,
+  PitchStatus,
+  PrHub,
+  ProfileInput,
+  VerificationStatus,
   AttendanceWeek,
   ConvertLead,
   LeadActivityInput,
@@ -115,6 +142,9 @@ import * as reportsMock from './mock/reports';
 import * as peopleMock from './mock/people';
 import * as pipelineMock from './mock/pipeline';
 import * as timesheetMock from './mock/timesheet';
+import * as influencersMock from './mock/influencers';
+import * as partnersMock from './mock/partners';
+import * as offersMock from './mock/offers';
 import * as mock from './mock/handlers';
 
 const MODE = (import.meta.env.VITE_API_MODE ?? 'mock') as 'mock' | 'http';
@@ -544,6 +574,110 @@ export const api = {
     stopTimer: () => (isMock ? fromMock(timesheetMock.stopTimer) : http<TimeEntry | null>('/me/timer/stop', json('POST', {}))),
     submitWeek: (weekStart: string) =>
       isMock ? fromMock((u) => timesheetMock.submitWeek(u, weekStart)) : http<Timesheet>('/me/timesheet/submit', json('POST', { weekStart })),
+  },
+  /** Week 7. Influencers: public sign-up, the creator's own pages, client discovery and admin. */
+  influencers: {
+    signUp: (body: InfluencerSignup) =>
+      isMock ? fromMockPublic(() => influencersMock.signUp(body)) : http<{ email: string }>('/public/influencers/signup', json('POST', body)),
+    async verifyEmail(token: string): Promise<Session> {
+      const s = isMock ? await fromMockPublic(() => influencersMock.verifySignup(token)) : await http<Session>('/public/influencers/verify', json('POST', { token }));
+      remember(s);
+      return s;
+    },
+    myProfile: () => (isMock ? fromMock(influencersMock.myProfile) : http<InfluencerProfile>('/me/influencer')),
+    updateProfile: (body: ProfileInput) =>
+      isMock ? fromMock((u) => influencersMock.updateMyProfile(u, body)) : http<InfluencerProfile>('/me/influencer', json('PATCH', body)),
+    submitProfile: () => (isMock ? fromMock(influencersMock.submitForVerification) : http<InfluencerProfile>('/me/influencer/submit', json('POST', {}))),
+    myCampaigns: () => (isMock ? fromMock(influencersMock.myCampaigns) : http<MyCampaign[]>('/me/campaigns')),
+    respond: (id: string, action: 'ACCEPT' | 'COUNTER' | 'DECLINE', counterFee?: number) =>
+      isMock
+        ? fromMock((u) => influencersMock.respondToInvite(u, id, action, counterFee))
+        : http<MyCampaign>(`/me/campaigns/${enc(id)}/respond`, json('POST', { action, counterFee })),
+    submitDraft: (id: string, body: { caption: string; fileName: string; disclosure: boolean }) =>
+      isMock ? fromMock((u) => influencersMock.submitDraft(u, id, body)) : http<MyCampaign>(`/me/campaigns/${enc(id)}/draft`, json('POST', body)),
+    submitLive: (id: string, body: { liveUrl: string; proofFile: string }) =>
+      isMock ? fromMock((u) => influencersMock.submitLive(u, id, body)) : http<MyCampaign>(`/me/campaigns/${enc(id)}/live`, json('POST', body)),
+    myPayouts: () => (isMock ? fromMock(influencersMock.myPayouts) : http<MyPayouts>('/me/payouts')),
+    // client
+    discover: (q: DiscoveryQuery = {}) => (isMock ? fromMock((u) => influencersMock.discover(u, q)) : http<DiscoveryCard[]>(`/discovery/influencers${qs(q)}`)),
+    toggleShortlist: (id: string) =>
+      isMock ? fromMock((u) => influencersMock.toggleShortlist(u, id)) : http<DiscoveryCard>(`/discovery/shortlist/${enc(id)}`, json('POST', {})),
+    requestCollab: (body: CollabRequestInput) =>
+      isMock ? fromMock((u) => influencersMock.requestCollab(u, body)) : http<CollabRequest>('/discovery/requests', json('POST', body)),
+    myRequests: () => (isMock ? fromMock(influencersMock.myCollabRequests) : http<CollabRequest[]>('/discovery/requests')),
+    // admin
+    list: (q: { verification?: VerificationStatus; q?: string } = {}) =>
+      isMock ? fromMock((u) => influencersMock.listInfluencers(u, q)) : http<InfluencerAdminItem[]>(`/influencers${qs(q)}`),
+    decide: (id: string, decision: 'VERIFY' | 'REJECT', reason?: string) =>
+      isMock
+        ? fromMock((u) => influencersMock.decideVerification(u, id, decision, reason))
+        : http<InfluencerAdminItem>(`/influencers/${enc(id)}/verification`, json('POST', { decision, reason })),
+    requests: () => (isMock ? fromMock(influencersMock.listCollabRequests) : http<CollabRequest[]>('/influencers/requests')),
+    campaigns: () => (isMock ? fromMock(influencersMock.listCampaigns) : http<CampaignItem[]>('/campaigns')),
+    campaign: (id: string) => (isMock ? fromMock((u) => influencersMock.getCampaign(u, id)) : http<CampaignDetail>(`/campaigns/${enc(id)}`)),
+    createCampaign: (body: NewCampaign) =>
+      isMock ? fromMock((u) => influencersMock.createCampaign(u, body)) : http<CampaignDetail>('/campaigns', json('POST', body)),
+    invite: (id: string, body: { influencerId: string; fee: number; respondBy: string; draftDue: string }) =>
+      isMock ? fromMock((u) => influencersMock.inviteToCampaign(u, id, body)) : http<CampaignDetail>(`/campaigns/${enc(id)}/invites`, json('POST', body)),
+    decideCounter: (id: string, influencerId: string, accept: boolean) =>
+      isMock
+        ? fromMock((u) => influencersMock.decideCounter(u, id, influencerId, accept))
+        : http<CampaignDetail>(`/campaigns/${enc(id)}/collabs/${enc(influencerId)}/counter`, json('POST', { accept })),
+    reviewDraft: (id: string, influencerId: string, decision: 'APPROVE' | 'CHANGES', feedback?: string) =>
+      isMock
+        ? fromMock((u) => influencersMock.reviewDraft(u, id, influencerId, decision, feedback))
+        : http<CampaignDetail>(`/campaigns/${enc(id)}/collabs/${enc(influencerId)}/review`, json('POST', { decision, feedback })),
+    rate: (id: string, influencerId: string, rating: number) =>
+      isMock
+        ? fromMock((u) => influencersMock.rateCollab(u, id, influencerId, rating))
+        : http<CampaignDetail>(`/campaigns/${enc(id)}/collabs/${enc(influencerId)}/rating`, json('POST', { rating })),
+    payouts: () => (isMock ? fromMock(influencersMock.listPayouts) : http<Payout[]>('/payouts')),
+    approvePayout: (id: string) => (isMock ? fromMock((u) => influencersMock.approvePayout(u, id)) : http<Payout>(`/payouts/${enc(id)}/approve`, json('POST', {}))),
+    rejectPayout: (id: string, reason: string) =>
+      isMock ? fromMock((u) => influencersMock.rejectPayout(u, id, reason)) : http<Payout>(`/payouts/${enc(id)}/reject`, json('POST', { reason })),
+    markPaid: (id: string, reference: string) =>
+      isMock ? fromMock((u) => influencersMock.markPayoutPaid(u, id, reference)) : http<Payout>(`/payouts/${enc(id)}/paid`, json('POST', { reference })),
+  },
+  /** Week 7. Partner portal and the internal PR hub. */
+  partners: {
+    myBriefs: () => (isMock ? fromMock(partnersMock.myBriefs) : http<PartnerBrief[]>('/partner/briefs')),
+    start: (id: string) => (isMock ? fromMock((u) => partnersMock.startBrief(u, id)) : http<PartnerBrief>(`/partner/briefs/${enc(id)}/start`, json('POST', {}))),
+    submit: (id: string, body: { files: string[]; note: string }) =>
+      isMock ? fromMock((u) => partnersMock.submitBrief(u, id, body)) : http<PartnerBrief>(`/partner/briefs/${enc(id)}/submit`, json('POST', body)),
+    myInvoices: () => (isMock ? fromMock(partnersMock.myInvoices) : http<PartnerInvoice[]>('/partner/invoices')),
+    submitInvoice: (body: NewPartnerInvoice) =>
+      isMock ? fromMock((u) => partnersMock.submitInvoice(u, body)) : http<PartnerInvoice>('/partner/invoices', json('POST', body)),
+    briefs: () => (isMock ? fromMock(partnersMock.listBriefs) : http<PartnerBrief[]>('/partner-briefs')),
+    createBrief: (body: NewBrief) => (isMock ? fromMock((u) => partnersMock.createBrief(u, body)) : http<PartnerBrief>('/partner-briefs', json('POST', body))),
+    reviewBrief: (id: string, decision: 'APPROVE' | 'CHANGES', feedback?: string) =>
+      isMock
+        ? fromMock((u) => partnersMock.reviewBrief(u, id, decision, feedback))
+        : http<PartnerBrief>(`/partner-briefs/${enc(id)}/review`, json('POST', { decision, feedback })),
+    invoices: () => (isMock ? fromMock(partnersMock.listPartnerInvoices) : http<PartnerInvoice[]>('/partner-invoices')),
+    decideInvoice: (id: string, decision: 'APPROVE' | 'REJECT' | 'PAID', note?: string) =>
+      isMock
+        ? fromMock((u) => partnersMock.decidePartnerInvoice(u, id, decision, note))
+        : http<PartnerInvoice>(`/partner-invoices/${enc(id)}/decision`, json('POST', { decision, note })),
+    hub: () => (isMock ? fromMock(partnersMock.prHub) : http<PrHub>('/pr')),
+    addContact: (body: NewMediaContact) => (isMock ? fromMock((u) => partnersMock.addContact(u, body)) : http<MediaContact>('/pr/contacts', json('POST', body))),
+    updateContact: (id: string, patch: { verified?: boolean; doNotContact?: boolean; consent?: boolean }) =>
+      isMock ? fromMock((u) => partnersMock.updateContact(u, id, patch)) : http<MediaContact>(`/pr/contacts/${enc(id)}`, json('PATCH', patch)),
+    createPitch: (body: { title: string; clientId: string; recipientIds: string[] }) =>
+      isMock ? fromMock((u) => partnersMock.createPitch(u, body)) : http<Pitch>('/pr/pitches', json('POST', body)),
+    updatePitch: (id: string, status: PitchStatus) =>
+      isMock ? fromMock((u) => partnersMock.updatePitch(u, id, status)) : http<Pitch>(`/pr/pitches/${enc(id)}`, json('PATCH', { status })),
+    addCoverage: (body: { clientId: string; outlet: string; headline: string; url: string; date: string; reach: number; pitchId?: string }) =>
+      isMock ? fromMock((u) => partnersMock.addCoverage(u, body)) : http<Coverage>('/pr/coverage', json('POST', body)),
+    exportContacts: () => (isMock ? fromMock(partnersMock.exportContacts) : http<ExportFile>('/pr/contacts/export')),
+  },
+  /** Week 7. Dashboard offer slot. */
+  offers: {
+    click: (id: string) => (isMock ? fromMock((u) => offersMock.clickOffer(u, id)) : http<{ message: string }>(`/offers/${enc(id)}/click`, json('POST', {}))),
+    dismiss: (id: string) => (isMock ? fromMock((u) => offersMock.dismissOffer(u, id)) : http<void>(`/offers/${enc(id)}/dismiss`, json('POST', {}))),
+    list: () => (isMock ? fromMock(offersMock.listOffers) : http<OfferItem[]>('/offers')),
+    create: (body: OfferInput) => (isMock ? fromMock((u) => offersMock.createOffer(u, body)) : http<OfferItem>('/offers', json('POST', body))),
+    update: (id: string, body: OfferInput) =>
+      isMock ? fromMock((u) => offersMock.updateOffer(u, id, body)) : http<OfferItem>(`/offers/${enc(id)}`, json('PUT', body)),
   },
   /** Prototype only: emails the mock would have sent, so invite and reset links can be opened. */
   demo: {
